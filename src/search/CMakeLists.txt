@@ -3,6 +3,8 @@ project(search)
 
 set(CMAKE_CXX_STANDARD 17)
 
+set(CPLEX_SOURCE_DIR /home/dh/programme/CPLEX_Studio1210)
+list(APPEND linker_flags "$<$<CONFIG:DEBUG>:-lpthread;-g>" "$<$<CONFIG:RELEASE>:-flto;-lpthread>")
 
 if (CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_CONFIGURATION_TYPES Debug Release)
@@ -19,7 +21,7 @@ set(CMAKE_CXX_FLAGS "-Wall -Wnon-virtual-dtor")
 
 # Release
 set(CMAKE_CXX_FLAGS_RELEASE
-        "-O3 -g -DNDEBUG -fomit-frame-pointer -Werror")
+        "-O3 -g -DNDEBUG -fomit-frame-pointer")
 
 # Debug and Profile
 set(CMAKE_CXX_FLAGS_DEBUG
@@ -94,6 +96,32 @@ add_executable(search
         lifted_heuristic/rules/join.h lifted_heuristic/rules/product.h lifted_heuristic/rules/project.h
         lifted_heuristic/rule_matcher.cc lifted_heuristic/rule_matcher.h
         lifted_heuristic/grounders/grounder.h
-        lifted_heuristic/grounders/weighted_grounder.cc lifted_heuristic/grounders/weighted_grounder.h search_engines/lazy_search.cc search_engines/lazy_search.h)
+        lifted_heuristic/grounders/weighted_grounder.cc lifted_heuristic/grounders/weighted_grounder.h search_engines/lazy_search.cc search_engines/lazy_search.h heuristics/liftedRP.cpp heuristics/liftedRP.h)
 
+add_library(cplex SHARED IMPORTED)
+set_target_properties(cplex  PROPERTIES
+        IMPORTED_LOCATION "${CPLEX_SOURCE_DIR}/cplex/lib/x86-64_linux/static_pic/libcplex.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${CPLEX_SOURCE_DIR}/cplex/include"
+        )
+
+add_library(ilocplex SHARED IMPORTED)
+set_target_properties(ilocplex  PROPERTIES
+        IMPORTED_LOCATION "${CPLEX_SOURCE_DIR}/cplex/lib/x86-64_linux/static_pic/libilocplex.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${CPLEX_SOURCE_DIR}/cplex/include"
+        )
+
+add_library(concert SHARED IMPORTED)
+set_target_properties(concert  PROPERTIES
+        IMPORTED_LOCATION "${CPLEX_SOURCE_DIR}/concert/lib/x86-64_linux/static_pic/libconcert.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${CPLEX_SOURCE_DIR}/concert/include"
+        )
+
+target_link_options(search PUBLIC ${linker_flags})
+target_link_libraries(search PRIVATE ilocplex)
+target_link_libraries(search PRIVATE concert)
+target_link_libraries(search PRIVATE cplex)
+target_link_libraries(search PRIVATE m)
+target_link_libraries(search PRIVATE pthread)
+target_link_libraries(search PRIVATE dl)
+#target_link_libraries(search PRIVATE hlm)
 target_link_libraries(search LINK_PUBLIC ${Boost_LIBRARIES})

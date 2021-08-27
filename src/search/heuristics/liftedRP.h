@@ -10,6 +10,8 @@
 
 class liftedRP : public Heuristic{
 public:
+    liftedRP(const Task task);
+
     int compute_heuristic(const DBState & s, const Task& task) final;
 };
 
