@@ -139,11 +139,16 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
     }
 
     // create main optimization function
-    //for (int i = 0; i < planLength; i+=maxArity) {
-    //}
+    IloNumExpr mainExp(env);
+    for (int i = 0; i < planLength; i++) {
+        v.add(IloNumVar(env, 0, 1, IloNumVar::Bool));
+        string vName = "a_opt" + to_string(i);
+        v[v.getSize() - 1].setName(vName.c_str());
+        model.add(v[v.getSize() - 1] * largeC >= v[actionID(i)]);
+        mainExp = mainExp + (v[v.getSize() - 1]);
+    }
 
     // enforce typing of action parameters
-
     for (int i = 0; i < planLength; i++) {
         int iSchema = actionID(i);
         for (int j = 1; j <= numActions; j++) { // actions with base 1 (!)
@@ -168,8 +173,6 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
     }
     //model.add(v[0] == 3);
 
-    IloNumExpr mainExp(env);
-    mainExp = mainExp + (v[0]);
     model.add(IloMinimize(env, mainExp));
     IloCplex cplex(model);
     cplex.exportModel("/home/dh/Schreibtisch/LiftedDelRel/test.lp");
