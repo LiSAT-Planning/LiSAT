@@ -8,10 +8,20 @@
 #include <ilcplex/ilocplex.h>
 #include "heuristic.h"
 
+struct achiever {
+    // the predicate "pred p0 p1 p3"
+    // can be achieved using the following action
+    int action = 0;
+    // let the following be "v1 v3 v0", these are (a subset of) parameters of the action
+    int* params;
+    // then, to achieve the predicate given above, the following must hold
+    // v1 == p0, v3 == p1, v0 == p3
+} ;
+
 class liftedRP : public Heuristic{
 private:
     const int largeC = 100000;
-    int planLength = 2;
+    int planLength = 10;
     int maxArity = -1;
 
     int numObjs = -1;
@@ -29,6 +39,7 @@ private:
     unordered_set<int>* toptasks;
     unordered_set<int> done;
 
+    vector<achiever*>* achievers;
     int sortObjs(int index, int type);
 public:
 

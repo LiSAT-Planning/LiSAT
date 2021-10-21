@@ -4,6 +4,7 @@
 
 #include "liftedRP.h"
 #include <unordered_set>
+#include <cassert>
 
 using namespace std;
 
@@ -86,6 +87,7 @@ liftedRP::liftedRP(const Task task) {
         }
     }
 
+    // sort obj such that objects of same parent type are adjacent
     upperTindex = new int[numTypes];
     lowerTindex = new int[numTypes];
     objToIndex = new int[numObjs];
@@ -116,6 +118,31 @@ liftedRP::liftedRP(const Task task) {
     cout << "- num actions " << numActions << endl;
     cout << "- num objects " << numObjs << endl;
     cout << "- max arity " << maxArity << endl;
+
+
+    cout << "- building achiever lookup table" << endl;
+    int numPreds = task.predicates.size();
+    achievers = new vector<achiever*>[numPreds];
+    for (int ia = 0; ia < task.actions.size(); ia++) {
+        auto a = task.actions[ia];
+        for (int ie = 0; ie < a.get_effects().size(); ie++) {
+            auto eff = a.get_effects()[ie];
+            assert(eff.predicate_symbol < numPreds);
+            achiever* ach = new achiever;
+            ach->action = ia;
+            int pred = eff.predicate_symbol;
+            int arity = task.predicates[pred].getArity();
+            ach->params = new int[arity];
+            for (int ip = 0; ip < eff.arguments.size(); ip++) {
+                auto args = eff.arguments[ip];
+                assert(!args.constant);
+                ach->params[ip] = args.index;
+            }
+
+            achievers[pred].push_back(ach);
+        }
+    }
+
 }
 
 int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
@@ -151,7 +178,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
     // enforce typing of action parameters
     for (int i = 0; i < planLength; i++) {
         int iSchema = actionID(i);
-        for (int j = 1; j <= numActions; j++) { // actions with base 1 (!)
+        for (int j = 1; j <= numActions; j++) { // actions with initial index 1 (!)
             cout << task.actions[j - 1].get_name() << endl;
             IloConstraint schemaEq = (v[iSchema] == j);
             auto params = task.actions[j - 1].get_parameters();
@@ -169,6 +196,13 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
                 model.add(lowerVarRange);
                 model.add(upperVarRange);
             }
+        }
+    }
+
+    // add goal condition
+    for (int i = 0; i < planLength; i++) {
+        for (int j = 0; j < task.goal.goal.size(); j++) {
+
         }
     }
     //model.add(v[0] == 3);
@@ -192,14 +226,14 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
             int x = round(cplex.getValue(v[actionID(i)])) - 1;
             if (x >= 0) {
                 cout << "a" << i << "=" << task.actions[x].get_name();
-            }
-            for (int j = 0; j < maxArity; j++) {
-                int x = round(cplex.getValue(v[paramID(i, j)])) - 1;
-                if(x >= 0) {
-                    cout << " p" << j << "=" << task.objects[indexToObj[x]].getName();
+                for (int j = 0; j < maxArity; j++) {
+                    int x = round(cplex.getValue(v[paramID(i, j)])) - 1;
+                    if (x >= 0) {
+                        cout << " p" << j << "=" << task.objects[indexToObj[x]].getName();
+                    }
                 }
+                cout << endl;
             }
-            cout << endl;
         }
     }
     cout << "res: " << res << endl;
