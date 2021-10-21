@@ -44,6 +44,79 @@ liftedRP::liftedRP(const Task task) {
         }
     }
 
+    cout << "- building achiever lookup table" << endl;
+    // !!! this code assumes the non-sparse (i.e. transitively closed) typing !!!
+    for (int iAction = 0; iAction < task.actions.size(); iAction++) {
+        auto a = task.actions[iAction];
+        achievers.push_back(new ActionPrecAchievers);
+        const auto precs = task.actions[iAction].get_precondition();
+        for (int iPrec = 0; iPrec < precs.size(); iPrec++) {
+            achievers[iAction]->precAchievers.push_back(new ActionPrecAchiever);
+            const auto prec = precs[iPrec];
+            // check for this single prec which other actions can achieve it. need to check
+            // - predicate
+            // - typing of the specific parameters
+            for (int iPosAch = 0; iPosAch < task.actions.size(); iPosAch++) {
+                auto posAchAction = task.actions[iPosAch];
+                for (int ie = 0; ie < posAchAction.get_effects().size(); ie++) {
+                    auto eff = posAchAction.get_effects()[ie];
+                    if ((eff.predicate_symbol == prec.predicate_symbol) && (eff.negated == prec.negated)){
+                        /* ** check typing **
+                         * what shall be excluded is that the predicate is defined on a
+                         * parent type, but the effect and the precondition are siblings
+                         *
+                         * example: In a transport domain, a locatable object may be a
+                         * transporter or a package. The "at" predicate may be defined
+                         * on "locatable"s. However, the "at" predicate of a package
+                         * cannot be fulfilled with a drive action.
+                         */
+                        bool typesCompatible = true;
+                        for (int iArg = 0; iArg < prec.arguments.size(); iArg++) {
+                            int varP = prec.arguments[iArg].index;
+                            int typeP = a.get_parameters()[varP].type;
+                            int varE = eff.arguments[iArg].index;
+                            int typeE = posAchAction.get_parameters()[varE].type;
+                            if (typeP == typeE) continue;
+                            if (parents[typeP].find(typeE) != parents[typeP].end()) continue;
+                            if (parents[typeE].find(typeP) != parents[typeE].end()) continue;
+                            typesCompatible = false;
+                            break;
+                        }
+                        if (typesCompatible) {
+                            Achiever *ach = new Achiever;
+                            ach->action = iPosAch;
+                            ach->effect = ie;
+                            for (int ip = 0; ip < eff.arguments.size(); ip++) {
+                                auto args = eff.arguments[ip];
+                                assert(!args.constant);
+                                ach->params.push_back(args.index);
+                            }
+                            achievers[iAction]->precAchievers[iPrec]->achievers.push_back(ach);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    cout << "found achievers:" << endl;
+    for (int iAction = 0; iAction < task.actions.size(); iAction++) {
+        cout << "- action '" << task.actions[iAction].get_name() << "'";
+        auto precs = task.actions[iAction].get_precondition();
+        cout << ", which has " << precs.size() << " preconditions" << endl;
+        for (int iPrec = 0; iPrec < precs.size(); iPrec++) {
+            cout << "  - prec: '" << task.predicates[precs[iPrec].predicate_symbol].getName() << "' achieved by";
+            auto achs = achievers[iAction]->precAchievers[iPrec]->achievers;
+            for (int iAchiever = 0; iAchiever < achs.size(); iAchiever++) {
+                auto achieverAction = task.actions[achs[iAchiever]->action];
+                cout << endl << "    - '" << achieverAction.get_name() << "'";
+                cout << " eff: " << achs[iAchiever]->effect;
+                cout << " pred: '" << task.predicates[achieverAction.get_effects()[achs[iAchiever]->effect].predicate_symbol].getName() << "'";
+            }
+            if(achs.empty()) {cout << " s0 only.";}
+            cout << endl;
+        }
+    }
+
     // make sparse
     for (int i = 0; i < numTypes; i++) {
         for (int j = 0; j < numTypes; j++) {
@@ -118,31 +191,6 @@ liftedRP::liftedRP(const Task task) {
     cout << "- num actions " << numActions << endl;
     cout << "- num objects " << numObjs << endl;
     cout << "- max arity " << maxArity << endl;
-
-
-    cout << "- building achiever lookup table" << endl;
-    int numPreds = task.predicates.size();
-    achievers = new vector<achiever*>[numPreds];
-    for (int ia = 0; ia < task.actions.size(); ia++) {
-        auto a = task.actions[ia];
-        for (int ie = 0; ie < a.get_effects().size(); ie++) {
-            auto eff = a.get_effects()[ie];
-            assert(eff.predicate_symbol < numPreds);
-            achiever* ach = new achiever;
-            ach->action = ia;
-            int pred = eff.predicate_symbol;
-            int arity = task.predicates[pred].getArity();
-            ach->params = new int[arity];
-            for (int ip = 0; ip < eff.arguments.size(); ip++) {
-                auto args = eff.arguments[ip];
-                assert(!args.constant);
-                ach->params[ip] = args.index;
-            }
-
-            achievers[pred].push_back(ach);
-        }
-    }
-
 }
 
 int liftedRP::compute_heuristic(const DBState &s, const Task &task) {

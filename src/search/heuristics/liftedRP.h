@@ -8,17 +8,29 @@
 #include <ilcplex/ilocplex.h>
 #include "heuristic.h"
 
-struct achiever {
-    // the predicate "pred p0 p1 p3"
+struct Achiever {
+    // the precondition "pred p0 p1 p3"
     // can be achieved using the following action
-    int action = 0;
+    int action = -1;
+    int effect = -1; // so far only used for debugging
     // let the following be "v1 v3 v0", these are (a subset of) parameters of the action
-    int* params;
+    vector<int> params;
     // then, to achieve the predicate given above, the following must hold
     // v1 == p0, v3 == p1, v0 == p3
 } ;
 
-class liftedRP : public Heuristic{
+struct ActionPrecAchiever {
+    // it stores for a **single action precondition** which other action can achieve it
+    vector<Achiever*> achievers;
+    // todo: add which s0 literals can fulfill this precondition
+};
+
+struct ActionPrecAchievers {
+    // for a single action, it stores for **each precondition** which other action can achieve it
+    vector<ActionPrecAchiever*> precAchievers;
+};
+
+class liftedRP : public Heuristic {
 private:
     const int largeC = 100000;
     int planLength = 10;
@@ -39,7 +51,7 @@ private:
     unordered_set<int>* toptasks;
     unordered_set<int> done;
 
-    vector<achiever*>* achievers;
+    vector<ActionPrecAchievers*> achievers;
     int sortObjs(int index, int type);
 public:
 
