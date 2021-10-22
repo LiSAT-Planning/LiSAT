@@ -81,6 +81,78 @@ liftedRP::liftedRP(const Task task) {
         }
     }
 
+    // make sparse
+    for (int i = 0; i < numTypes; i++) {
+        for (int j = 0; j < numTypes; j++) {
+            if (i == j) continue;
+            for (int k = 0; k < numTypes; k++) {
+                if ((i == k) || (j == k)) continue;
+                if ((parents[i].find(j) != parents[i].end())
+                    && (parents[j].find(k) != parents[j].end())
+                    && (parents[i].find(k) != parents[i].end())) {
+                    parents[i].erase(parents[i].find(k));
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < numTypes; i++) {
+        cout << task.type_names[i] << " -> {";
+        bool first = true;
+        for (auto p : parents[i]) {
+            if (first) {
+                first = false;
+            } else {
+                cout << ", ";
+            }
+            cout << task.type_names[p];
+        }
+        cout << "}" << endl;
+    }
+
+    children = new unordered_set<int>[numTypes];
+    ps = new unordered_set<int>[numTypes];
+    toptasks = new unordered_set<int>;
+    for (int i = 0; i < numTypes; i++) {
+        if (parents[i].size() == 0) {
+           toptasks->insert(i);
+        } else {
+            for (int p : parents[i]) {
+                children[p].insert(i);
+                ps[i].insert(p);
+            }
+        }
+    }
+
+    // sort obj such that objects of same parent type are adjacent
+    upperTindex = new int[numTypes];
+    lowerTindex = new int[numTypes];
+    objToIndex = new int[numObjs];
+    indexToObj = new int[numObjs];
+
+    int r = 0;
+    for (int t : *toptasks) {
+        r = sortObjs(r, t);
+    }
+
+    for (int i = 0; i < task.objects.size(); i++) {
+        cout << task.objects[i].getName() << " ";
+    }
+    cout << endl;
+
+    for (int i = 0; i < numTypes; i++) {
+        cout << task.type_names[i] << ":\t" << lowerTindex[i] << "-" << upperTindex[i] << " = {";
+        for(int j = lowerTindex[i]; j <= upperTindex[i]; j++) {
+            if (j > lowerTindex[i]) {
+                cout << ", ";
+            }
+            int k = indexToObj[j];
+            cout << task.objects[k].getName();
+        }
+        cout << "}" << endl;
+    }
+
+
     cout << "- building achiever lookup table" << endl;
     // !!! this code assumes the non-sparse (i.e. transitively closed) typing !!!
     for (int iAction = 0; iAction < task.actions.size(); iAction++) {
@@ -109,15 +181,42 @@ liftedRP::liftedRP(const Task task) {
                          */
                         bool typesCompatible = true;
                         for (int iArg = 0; iArg < prec.arguments.size(); iArg++) {
-                            int varP = prec.arguments[iArg].index;
-                            int typeP = a.get_parameters()[varP].type;
-                            int varE = eff.arguments[iArg].index;
-                            int typeE = posAchAction.get_parameters()[varE].type;
-                            if (typeP == typeE) continue;
-                            if (parents[typeP].find(typeE) != parents[typeP].end()) continue;
-                            if (parents[typeE].find(typeP) != parents[typeE].end()) continue;
-                            typesCompatible = false;
-                            break;
+							if (!prec.arguments[iArg].constant && !eff.arguments[iArg].constant){
+                            	int varP = prec.arguments[iArg].index;
+								int typeP = a.get_parameters()[varP].type;
+                            	int varE = eff.arguments[iArg].index;
+                            	int typeE = posAchAction.get_parameters()[varE].type;
+                            	if (typeP == typeE) continue;
+                            	if (parents[typeP].find(typeE) != parents[typeP].end()) continue;
+                            	if (parents[typeE].find(typeP) != parents[typeE].end()) continue;
+                            	typesCompatible = false;
+                            	break;
+							} else if (prec.arguments[iArg].constant && !eff.arguments[iArg].constant){
+                            	int varE = eff.arguments[iArg].index;
+                            	int typeE = posAchAction.get_parameters()[varE].type;
+								
+								int constP = prec.arguments[iArg].index; 
+
+								if (lowerTindex[typeE] > constP || upperTindex[typeE] < constP){
+									typesCompatible = false;
+									break;
+								}
+							} else if (!prec.arguments[iArg].constant && eff.arguments[iArg].constant){
+                            	int varP = prec.arguments[iArg].index;
+								int typeP = a.get_parameters()[varP].type;
+                            	
+								int constE = eff.arguments[iArg].index;
+
+								if (lowerTindex[typeP] > constE || upperTindex[typeP] < constE){
+									typesCompatible = false;
+									break;
+								}
+							} else {
+								if (eff.arguments[iArg].index != prec.arguments[iArg].index){
+									typesCompatible = false;
+									break;
+								}
+							}
                         }
                         if (typesCompatible) {
                             Achiever *ach = new Achiever;
@@ -125,8 +224,12 @@ liftedRP::liftedRP(const Task task) {
                             ach->effect = ie;
                             for (int ip = 0; ip < eff.arguments.size(); ip++) {
                                 auto args = eff.arguments[ip];
-                                assert(!args.constant);
-                                ach->params.push_back(args.index);
+                                //assert(!args.constant);
+                                if (args.constant){
+									ach->params.push_back(-args.index-1);
+								} else {
+									ach->params.push_back(args.index);
+								}
                             }
                             achievers[iAction]->precAchievers[iPrec]->achievers.push_back(ach);
                         }
@@ -171,12 +274,20 @@ liftedRP::liftedRP(const Task task) {
                     bool typesCompatible = true;
                     for (int iArg = 0; iArg < goal.args.size(); iArg++) {
                         int goalObj = goal.args[iArg];
-                        int varE = eff.arguments[iArg].index;
-                        int typeE = posAchAction.get_parameters()[varE].type;
-                        if (types[typeE].find(goalObj) == types[typeE].end()) {
-                            typesCompatible = false;
-                            break;
-                        }
+                        
+						if (!eff.arguments[iArg].constant){
+							int varE = eff.arguments[iArg].index;
+                        	int typeE = posAchAction.get_parameters()[varE].type;
+                        	if (types[typeE].find(goalObj) == types[typeE].end()) {
+                        	    typesCompatible = false;
+                        	    break;
+                        	}
+						} else {
+							if (goalObj != eff.arguments[iArg].index){
+                        	    typesCompatible = false;
+                        	    break;
+							}
+						}
                     }
                     if (typesCompatible) {
                         Achiever *ach = new Achiever;
@@ -184,7 +295,10 @@ liftedRP::liftedRP(const Task task) {
                         ach->effect = ie;
                         for (int ip = 0; ip < eff.arguments.size(); ip++) {
                             auto args = eff.arguments[ip];
-                            ach->params.push_back(args.index);
+							if (args.constant)
+                            	ach->params.push_back(-args.index-1);
+							else
+								ach->params.push_back(args.index);
                         }
                         goalAchievers->precAchievers[iGoal]->achievers.push_back(ach);
                     }
@@ -290,78 +404,7 @@ liftedRP::liftedRP(const Task task) {
         }
     }
 
-    // make sparse
-    for (int i = 0; i < numTypes; i++) {
-        for (int j = 0; j < numTypes; j++) {
-            if (i == j) continue;
-            for (int k = 0; k < numTypes; k++) {
-                if ((i == k) || (j == k)) continue;
-                if ((parents[i].find(j) != parents[i].end())
-                    && (parents[j].find(k) != parents[j].end())
-                    && (parents[i].find(k) != parents[i].end())) {
-                    parents[i].erase(parents[i].find(k));
-                }
-            }
-        }
-    }
-
-    for (int i = 0; i < numTypes; i++) {
-        cout << task.type_names[i] << " -> {";
-        bool first = true;
-        for (auto p : parents[i]) {
-            if (first) {
-                first = false;
-            } else {
-                cout << ", ";
-            }
-            cout << task.type_names[p];
-        }
-        cout << "}" << endl;
-    }
-
-    children = new unordered_set<int>[numTypes];
-    ps = new unordered_set<int>[numTypes];
-    toptasks = new unordered_set<int>;
-    for (int i = 0; i < numTypes; i++) {
-        if (parents[i].size() == 0) {
-           toptasks->insert(i);
-        } else {
-            for (int p : parents[i]) {
-                children[p].insert(i);
-                ps[i].insert(p);
-            }
-        }
-    }
-
-    // sort obj such that objects of same parent type are adjacent
-    upperTindex = new int[numTypes];
-    lowerTindex = new int[numTypes];
-    objToIndex = new int[numObjs];
-    indexToObj = new int[numObjs];
-
-    int r = 0;
-    for (int t : *toptasks) {
-        r = sortObjs(r, t);
-    }
-
-    for (int i = 0; i < task.objects.size(); i++) {
-        cout << task.objects[i].getName() << " ";
-    }
-    cout << endl;
-
-    for (int i = 0; i < numTypes; i++) {
-        cout << task.type_names[i] << ":\t" << lowerTindex[i] << "-" << upperTindex[i] << " = {";
-        for(int j = lowerTindex[i]; j <= upperTindex[i]; j++) {
-            if (j > lowerTindex[i]) {
-                cout << ", ";
-            }
-            int k = indexToObj[j];
-            cout << task.objects[k].getName();
-        }
-        cout << "}" << endl;
-    }
-
-    cout << "- num actions " << numActions << endl;
+	cout << "- num actions " << numActions << endl;
     cout << "- num objects " << numObjs << endl;
     cout << "- max arity " << maxArity << endl;
 
@@ -417,6 +460,13 @@ void printVariableTruth(void* solver, sat_capsule & capsule){
 	}
 }
 
+bool liftedRP::atom_not_satisfied(const DBState &s,
+                                   const AtomicGoal &atomicGoal) const {
+    const auto &tuples = s.get_relations()[atomicGoal.predicate].tuples;
+    const auto it = tuples.find(atomicGoal.args);
+    const auto end = tuples.end();
+    return (!atomicGoal.negated && it==end) || (atomicGoal.negated && it!=end);
+}
 
 bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime) {
 
@@ -603,10 +653,27 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							// if the achiever has been selected then it must be present!
 							implies(solver,achieverVar,actionVars[i-1][achiever->action]);
 							for (size_t k = 0; k < achiever->params.size(); k++){
-								int myParam = precObjec.arguments[k].index; // my index position
 								int theirParam = achiever->params[k];
-								for(size_t o = 0; o < task.objects.size(); o++){
-									andImplies(solver,achieverVar,parameterVars[time][myParam][o], parameterVars[i-1][theirParam][o]);
+								
+								if (!precObjec.arguments[k].constant){
+									int myParam = precObjec.arguments[k].index; // my index position
+
+									if (theirParam < 0){
+										int theirConst  = -theirConst-1;
+										implies(solver,achieverVar,parameterVars[time][myParam][objToIndex[theirConst]]);
+									} else {
+										for(size_t o = 0; o < task.objects.size(); o++){
+											andImplies(solver,achieverVar,parameterVars[time][myParam][o], parameterVars[i-1][theirParam][o]);
+										}
+									}
+								} else {
+									// my param is a const
+									int myConst = precObjec.arguments[k].index; // my const ID
+									
+									if (theirParam >= 0){
+										implies(solver,achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst]]);
+									
+									} // else two constants, this has been checked statically
 								}
 							}
 						}
@@ -626,6 +693,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
 		const AtomicGoal & goalAtom = task.goal.goal[goal];
 		if (goalAtom.negated) continue; // TODO don't know what to do ...
+		if (!atom_not_satisfied(s,goalAtom)) continue; // goal is satisfied so we don't have to achieve it via actions
 
 		ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
 	
@@ -652,9 +720,12 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				for (size_t k = 0; k < achiever->params.size(); k++){
 					int myConst = goalAtom.args[k]; // my object (main index)
 					int theirParam = achiever->params[k];
-					for(size_t o = 0; o < task.objects.size(); o++){
-						implies(solver,achieverVar,parameterVars[pTime][theirParam][objToIndex[myConst]]);
-					}
+
+					if (theirParam >= 0){
+						for(size_t o = 0; o < task.objects.size(); o++){
+							implies(solver,achieverVar,parameterVars[pTime][theirParam][objToIndex[myConst]]);
+						}
+					} // else it is a constant and has already been checked
 				}
 			}
 			impliesOr(solver,goalSuppVar,achieverSelection);
@@ -668,12 +739,14 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	DEBUG(capsule.printVariables());
 
 	
+	cout << "Starting solver" << endl;
 	DEBUG(cout << "Starting solver" << endl);
 	std::clock_t solver_start = std::clock();
 	int state = ipasir_solve(solver);
 	std::clock_t solver_end = std::clock();
 	double solver_time_in_ms = 1000.0 * (solver_end-solver_start) / CLOCKS_PER_SEC;
 	DEBUG(cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl);
+	cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl;
 	
 	
 	DEBUG(cout << "Solver State: " << state << endl);
@@ -716,12 +789,15 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 	if (satMode){
 		std::clock_t start = std::clock();
-		for (int i = 1; i < 100; i++){
+		for (int i = 1; i < 200; i++){
 			planLength = i;
 			if (compute_heuristic_sat(s,task,start)){
 				return i;
+			} else {
+				cout << "\t\tNo plan of length: " << planLength << endl;
 			}
 		}
+		return 100;
 	}
 
 
