@@ -35,8 +35,9 @@ struct ActionPrecAchievers {
 class liftedRP : public Heuristic {
 private:
     const int largeC = 100000;
-    int planLength = 10;
+    int planLength = 8;
     int maxArity = -1;
+    int maxPrec = -1;
 
     int numObjs = -1;
     int numActions = -1;

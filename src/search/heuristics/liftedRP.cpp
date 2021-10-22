@@ -7,6 +7,7 @@
 #include "ipasir.h"
 #include <unordered_set>
 #include <cassert>
+#include <chrono>
 
 using namespace std;
 
@@ -15,8 +16,9 @@ liftedRP::liftedRP(const Task task) {
     numObjs = task.objects.size();
     for (auto a: task.actions) {
         maxArity = max(maxArity, (int) a.get_parameters().size());
+        maxPrec = max(maxPrec, (int) a.get_precondition().size());
     }
-
+    
     cout << "- re-inferring type hierarchy..." << endl;
     int numTypes = task.type_names.size();
     types = new unordered_set<int>[numTypes];
@@ -333,9 +335,30 @@ int liftedRP::compute_heuristic_sat(const DBState &s, const Task &task) {
 							"-" + task.objects[indexToObj[o]].getName()));
 			}
 			parameterVarsTime.push_back(parameterVarsParameter);
+			// each parameter can have at most one value
+			atMostOne(solver,capsule,parameterVarsParameter);
 		}
 		parameterVars.push_back(parameterVarsTime);
-	
+
+
+
+		std::vector<std::vector<int>> precSupporter;
+		// precondition support selection
+		for (int p = 0; p < maxPrec; p++){
+			std::vector<int> precSupporterPrec;
+			for (int pTime = -1; pTime < time; pTime++){
+				int preSuppVar = capsule.new_variable();
+				precSupporterPrec.push_back(preSuppVar);
+				DEBUG(capsule.registerVariable(preSuppVar,
+							"preSupp@" + to_string(time) + "#" + to_string(p) + 
+							"-" + to_string(pTime)));
+			}
+
+			precSupporter.push_back(precSupporterPrec);
+		}
+
+
+		// action variables
 		std::vector<int> actionVarsTime;	
 		for (size_t action = 0; action < task.actions.size(); action++){
             DEBUG(cout << "\t" << task.actions[action].get_name() << endl);
@@ -379,16 +402,104 @@ int liftedRP::compute_heuristic_sat(const DBState &s, const Task &task) {
             for (int l = params.size(); l < maxArity; l++) {
 				impliesAllNot(solver,actionVar,parameterVars[time][l]);
 			}
+
+
+			// if this action is chosen, it has to be executable
+			// this means that every precondition is supported by a prior action or the initial state
+	        const auto precs = task.actions[action].get_precondition();
+	        for (int prec = 0; prec < precs.size(); prec++) {
+				// 1. Step: select the time step which supports
+				impliesOr(solver,actionVar,precSupporter[prec]);
+			
+				// 2. Step: Supporter of type 1: initial state
+            	const auto precObjec = precs[prec];
+				int predicate = precObjec.predicate_symbol;
+
+				
+				vector<vector<int>> supportingTuples;
+
+				// TODO: sind die nicht nach den predikaten sortiert????
+    			for (int i = 0; i < task.get_static_info().get_relations().size(); i++) {
+    			    auto rel = task.get_static_info().get_relations()[i];
+    			    auto tuple = task.get_static_info().get_tuples_of_relation(i);
+
+					if (predicate != rel.predicate_symbol) continue;
+					
+					// this is the correct predicate
+    			    for (vector<int> groundA: tuple) {
+    			    	supportingTuples.push_back(groundA);
+					}
+    			}
+
+    			for (int i = 0; i < task.initial_state.get_relations().size(); i++) {
+    			    auto rel = task.initial_state.get_relations()[i];
+    			    auto tuple = task.initial_state.get_tuples_of_relation(i);
+					
+					if (predicate != rel.predicate_symbol) continue;
+    			    
+					for (vector<int> groundA: tuple) {
+    			    	supportingTuples.push_back(groundA);
+    			    }
+    			}
+
+				if (supportingTuples.size() == 0){
+					DEBUG(cout << "\tno support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
+					impliesNot(solver,actionVar,precSupporter[prec][0]); // cannot be supported by init!
+				} else {
+					vector<int> suppOptions;
+					for (size_t i = 0; i < supportingTuples.size(); i++){
+						int suppVar = capsule.new_variable();
+						suppOptions.push_back(suppVar);
+						DEBUG(capsule.registerVariable(suppVar,
+									"preSupp@" + to_string(time) + "#" + to_string(action) + 
+									"-" + to_string(-1) + "_" + to_string(i)));
+					}
+					// one supporter must be chosen
+					impliesOr(solver,actionVar,precSupporter[prec][0],suppOptions);
+
+					for (size_t i = 0; i < supportingTuples.size(); i++){
+						vector<int> tuple = supportingTuples[i];
+
+						for (size_t j = 0; j < tuple.size(); j++){
+							int myObjIndex = objToIndex[tuple[j]];
+							if (precObjec.arguments[j].constant){
+								if (precObjec.arguments[j].index != tuple[j])
+									assertNot(solver,suppOptions[i]);
+							} else {
+								int myParam = precObjec.arguments[j].index;
+								implies(solver,suppOptions[i], parameterVars[time][myParam][myObjIndex]);
+							}
+						}
+					}
+				}
+
+				// 3. Step: Supporter of type 2: other actions
+				for (int i = 1; i < precSupporter[prec].size(); i++)
+					assertNot(solver,precSupporter[prec][i]);
+			
+			}
 		
 		}
 		actionVars.push_back(actionVarsTime);
 		atLeastOne(solver,capsule,actionVarsTime); // XXX: temporary for development
 		atMostOne(solver,capsule,actionVarsTime);
+
+
+
 	}
+
+
 	DEBUG(capsule.printVariables());
 
 	
+	cout << "Starting solver" << endl;
+	std::clock_t solver_start = std::clock();
 	int state = ipasir_solve(solver);
+	std::clock_t solver_end = std::clock();
+	double solver_time_in_ms = 1000.0 * (solver_end-solver_start) / CLOCKS_PER_SEC;
+	cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl;
+	
+	
 	cout << "Solver State: " << state << endl;
 	if (state == 10){
 		printVariableTruth(solver,capsule);
@@ -415,6 +526,7 @@ int liftedRP::compute_heuristic_sat(const DBState &s, const Task &task) {
 		}
 	}
 	exit(0);
+	//return 0;
 }
 
 
