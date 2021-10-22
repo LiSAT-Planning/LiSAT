@@ -52,6 +52,7 @@ private:
     unordered_set<int> done;
 
     vector<ActionPrecAchievers*> achievers;
+    ActionPrecAchievers* goalAchievers;
     int sortObjs(int index, int type);
 public:
 
