@@ -100,13 +100,53 @@ liftedRP::liftedRP(const Task task) {
             }
         }
     }
+
+    // same for goals
+    goalAchievers = new ActionPrecAchievers;
+    for (int iGoal = 0; iGoal < task.goal.goal.size(); iGoal++) {
+        AtomicGoal goal = task.goal.goal[iGoal];
+        goalAchievers->precAchievers.push_back(new ActionPrecAchiever);
+        for (int iPosAch = 0; iPosAch < task.actions.size(); iPosAch++) {
+            auto posAchAction = task.actions[iPosAch];
+            for (int ie = 0; ie < posAchAction.get_effects().size(); ie++) {
+                auto eff = posAchAction.get_effects()[ie];
+                if ((eff.predicate_symbol == goal.predicate) && (eff.negated == goal.negated)) {
+                    bool typesCompatible = true;
+                    for (int iArg = 0; iArg < goal.args.size(); iArg++) {
+                        int goalObj = goal.args[iArg];
+                        int varE = eff.arguments[iArg].index;
+                        int typeE = posAchAction.get_parameters()[varE].type;
+                        if (types[typeE].find(goalObj) == types[typeE].end()) {
+                            typesCompatible = false;
+                            break;
+                        }
+                    }
+                    if (typesCompatible) {
+                        Achiever *ach = new Achiever;
+                        ach->action = iPosAch;
+                        ach->effect = ie;
+                        for (int ip = 0; ip < eff.arguments.size(); ip++) {
+                            auto args = eff.arguments[ip];
+                            ach->params.push_back(args.index);
+                        }
+                        goalAchievers->precAchievers[iGoal]->achievers.push_back(ach);
+                    }
+                }
+            }
+        }
+    }
+
     cout << "found achievers:" << endl;
     for (int iAction = 0; iAction < task.actions.size(); iAction++) {
         cout << "- action '" << task.actions[iAction].get_name() << "'";
         auto precs = task.actions[iAction].get_precondition();
         cout << ", which has " << precs.size() << " preconditions" << endl;
         for (int iPrec = 0; iPrec < precs.size(); iPrec++) {
-            cout << "  - prec: '" << task.predicates[precs[iPrec].predicate_symbol].getName() << "' achieved by";
+            cout << "  - prec: ";
+            if (precs[iPrec].negated) {
+                cout << "not ";
+            }
+            cout << "'" << task.predicates[precs[iPrec].predicate_symbol].getName() << "' achieved by";
             auto achs = achievers[iAction]->precAchievers[iPrec]->achievers;
             for (int iAchiever = 0; iAchiever < achs.size(); iAchiever++) {
                 auto achieverAction = task.actions[achs[iAchiever]->action];
@@ -114,9 +154,28 @@ liftedRP::liftedRP(const Task task) {
                 cout << " eff: " << achs[iAchiever]->effect;
                 cout << " pred: '" << task.predicates[achieverAction.get_effects()[achs[iAchiever]->effect].predicate_symbol].getName() << "'";
             }
-            if(achs.empty()) {cout << " s0 only.";}
+            if (achs.empty()) {cout << " s0 only.";}
             cout << endl;
         }
+    }
+
+    cout << "goal achievers:" << endl;
+    for (int iGoal = 0; iGoal < task.goal.goal.size(); iGoal++) {
+        cout << "- goal ";
+        if (task.goal.goal[iGoal].negated) {
+            cout << "not ";
+        }
+        cout << "'" << task.predicates[task.goal.goal[iGoal].predicate].getName() << "'";
+        for (int iAchiever = 0; iAchiever < goalAchievers->precAchievers[iGoal]->achievers.size(); iAchiever++) {
+            auto ach = goalAchievers->precAchievers[iGoal]->achievers[iAchiever];
+            auto achieverAction = task.actions[ach->action];
+            cout << endl << "    - '" << achieverAction.get_name() << "'";
+            cout << " eff: " << ach->effect;
+            cout << " pred: '" << task.predicates[achieverAction.get_effects()[ach->effect].predicate_symbol].getName()
+                 << "'";
+        }
+        if (goalAchievers->precAchievers[iGoal]->achievers.empty()) { cout << " s0 only."; }
+        cout << endl;
     }
 
     // make sparse
@@ -193,6 +252,36 @@ liftedRP::liftedRP(const Task task) {
     cout << "- num actions " << numActions << endl;
     cout << "- num objects " << numObjs << endl;
     cout << "- max arity " << maxArity << endl;
+
+    for (int i = 0; i < task.predicates.size(); i++) {
+        cout << i << " " << task.predicates[i].getName() << endl;
+    }
+
+    cout << endl << "Initial state (static):" << endl;
+    for (int i = 0; i < task.get_static_info().get_relations().size(); i++) {
+        auto rel = task.get_static_info().get_relations()[i];
+        auto tuple = task.get_static_info().get_tuples_of_relation(i);
+        for (vector<int> groundA: tuple) {
+            cout << "(" << task.predicates[task.get_static_info().get_relations()[i].predicate_symbol].getName();
+            for (int obj: groundA) {
+                cout << " " << task.objects[obj].getName();
+            }
+            cout <<")" << endl;
+        }
+    }
+
+    cout << endl << "Initial state (non-static):" << endl;
+    for (int i = 0; i < task.initial_state.get_relations().size(); i++) {
+        auto rel = task.initial_state.get_relations()[i];
+        auto tuple = task.initial_state.get_tuples_of_relation(i);
+        for (vector<int> groundA: tuple) {
+            cout << "(" << task.predicates[task.initial_state.get_relations()[i].predicate_symbol].getName();
+            for (int obj: groundA) {
+                cout << " " << task.objects[obj].getName();
+            }
+            cout <<")" << endl;
+        }
+    }
 }
 
 
@@ -362,22 +451,23 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
         model.add(v[v.getSize() - 1] * largeC >= v[actionID(i)]);
         mainExp = mainExp + (v[v.getSize() - 1]);
     }
+    model.add(IloMinimize(env, mainExp));
 
     // enforce typing of action parameters
     for (int i = 0; i < planLength; i++) {
         int iSchema = actionID(i);
         for (int j = 1; j <= numActions; j++) { // actions with initial index 1 (!)
-            cout << task.actions[j - 1].get_name() << endl;
+            //cout << task.actions[j - 1].get_name() << endl;
             IloConstraint schemaEq = (v[iSchema] == j);
             auto params = task.actions[j - 1].get_parameters();
             for (int l = 0; l < params.size(); l++) {
-                cout << "- " << task.type_names[params[l].type] << ": ";
+                //cout << "- " << task.type_names[params[l].type] << ": ";
                 int lower = lowerTindex[params[l].type];
                 int upper = upperTindex[params[l].type];
-                for (int m = lower; m <= upper; m++) {
-                    cout << task.objects[indexToObj[m]].getName() << " ";
-                }
-                cout << endl;
+//                for (int m = lower; m <= upper; m++) {
+//                    cout << task.objects[indexToObj[m]].getName() << " ";
+//                }
+//                cout << endl;
                 int iP = paramID(i, l);
                 IloIfThen lowerVarRange(env, schemaEq, (v[iP] - 1) > (lower - 1));
                 IloIfThen upperVarRange(env, schemaEq, (v[iP] - 1) < (upper + 1));
@@ -388,14 +478,56 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
     }
 
     // add goal condition
-    for (int i = 0; i < planLength; i++) {
-        for (int j = 0; j < task.goal.goal.size(); j++) {
+    // todo: check for containment in current state
 
-        }
-    }
+//    for (int pred : task.goal.positive_nullary_goals) {
+//        if (!s.get_nullary_atoms()[pred]) {
+//
+//        }
+//    }
+//    for (int pred : task.goal.negative_nullary_goals) {
+//        if (!s.get_nullary_atoms()[pred]) {
+//
+//        }
+//    }
+//    for (const AtomicGoal &atomicGoal : task.goal.goal) {
+//        int goal_predicate = atomicGoal.predicate;
+//        const Relation &relation_at_goal_predicate = s.get_relations()[goal_predicate];
+//
+//        const auto it = relation_at_goal_predicate.tuples.find(atomicGoal.args);
+//        const auto end = relation_at_goal_predicate.tuples.end();
+//        if ((!atomicGoal.negated && it == end) || (atomicGoal.negated && it != end)) {
+//            return false;
+//        }
+//    }
+//    return true;
+
+
+
+
+
+
+
+
+
+
+
+//    for (int j = 0; j < task.goal.goal.size(); j++) {
+//        auto g = task.goal.goal[j];
+//        auto sPart = s.get_tuples_of_relation(g.predicate);
+//        if(sPart.find(g) == sPart.end()) {
+//
+//        }
+//        int pred = task.goal.goal[j].predicate;
+//        cout << "goal: " << task.predicates[pred].getName();
+//        for (int k = 0; k < task.goal.goal[j].args.size(); k++) {
+//            int obj = task.goal.goal[j].args[k];
+//            cout << " " << task.objects[obj].getName();
+//        }
+//        cout << endl;
+//    }
     //model.add(v[0] == 3);
 
-    model.add(IloMinimize(env, mainExp));
     IloCplex cplex(model);
     cplex.exportModel("/home/dh/Schreibtisch/LiftedDelRel/test.lp");
     cplex.setParam(IloCplex::Param::Threads, 1);
