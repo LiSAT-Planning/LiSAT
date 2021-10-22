@@ -70,7 +70,7 @@ public:
     liftedRP(const Task task);
 
     int compute_heuristic(const DBState & s, const Task& task) final;
-	int compute_heuristic_sat(const DBState &s, const Task &task);
+	bool compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & start);
 
     int actionID(int i);
 

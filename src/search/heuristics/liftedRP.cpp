@@ -418,9 +418,9 @@ void printVariableTruth(void* solver, sat_capsule & capsule){
 }
 
 
-int liftedRP::compute_heuristic_sat(const DBState &s, const Task &task) {
+bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime) {
 
-	cout << ipasir_signature() << endl;
+	//cout << ipasir_signature() << endl;
 	void* solver = ipasir_init();
 	
 	sat_capsule capsule;
@@ -541,9 +541,9 @@ int liftedRP::compute_heuristic_sat(const DBState &s, const Task &task) {
 					}
     			}
 
-    			for (int i = 0; i < task.initial_state.get_relations().size(); i++) {
-    			    auto rel = task.initial_state.get_relations()[i];
-    			    auto tuple = task.initial_state.get_tuples_of_relation(i);
+    			for (int i = 0; i < s.get_relations().size(); i++) {
+    			    auto rel = s.get_relations()[i];
+    			    auto tuple = s.get_tuples_of_relation(i);
 					
 					if (predicate != rel.predicate_symbol) continue;
     			    
@@ -553,7 +553,7 @@ int liftedRP::compute_heuristic_sat(const DBState &s, const Task &task) {
     			}
 
 				if (supportingTuples.size() == 0){
-					DEBUG(cout << "\tno support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
+					DEBUG(cout << "\tno init support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 					impliesNot(solver,actionVar,precSupporter[prec][0]); // cannot be supported by init!
 				} else {
 					vector<int> suppOptions;
@@ -584,8 +584,35 @@ int liftedRP::compute_heuristic_sat(const DBState &s, const Task &task) {
 				}
 
 				// 3. Step: Supporter of type 2: other actions
-				for (int i = 1; i < precSupporter[prec].size(); i++)
-					assertNot(solver,precSupporter[prec][i]);
+				for (int i = 1; i < precSupporter[prec].size(); i++){
+					ActionPrecAchiever* myAchievers = achievers[action]->precAchievers[prec];
+
+					if (myAchievers->achievers.size() == 0){
+						DEBUG(cout << "\tnon-achievable precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
+						impliesNot(solver,actionVar,precSupporter[prec][i]);
+					} else {
+						vector<int> achieverSelection;
+						for (size_t j = 0; j < myAchievers->achievers.size(); j++){
+							Achiever* achiever = myAchievers->achievers[j];
+							int achieverVar = capsule.new_variable();
+							achieverSelection.push_back(achieverVar);
+							DEBUG(capsule.registerVariable(achieverVar,
+										"preAchieve@" + to_string(time) + "#" + to_string(action) + 
+										"-" + to_string(i) + "_" + to_string(j)));
+
+							// if the achiever has been selected then it must be present!
+							implies(solver,achieverVar,actionVars[i-1][achiever->action]);
+							for (size_t k = 0; k < achiever->params.size(); k++){
+								int myParam = precObjec.arguments[k].index; // my index position
+								int theirParam = achiever->params[k];
+								for(size_t o = 0; o < task.objects.size(); o++){
+									andImplies(solver,achieverVar,parameterVars[time][myParam][o], parameterVars[i-1][theirParam][o]);
+								}
+							}
+						}
+						impliesOr(solver,actionVar,precSupporter[prec][i],achieverSelection);
+					}
+				}
 			
 			}
 		
@@ -593,27 +620,73 @@ int liftedRP::compute_heuristic_sat(const DBState &s, const Task &task) {
 		actionVars.push_back(actionVarsTime);
 		atLeastOne(solver,capsule,actionVarsTime); // XXX: temporary for development
 		atMostOne(solver,capsule,actionVarsTime);
-
-
-
 	}
+
+	// the goal must be achieved!
+	for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
+		const AtomicGoal & goalAtom = task.goal.goal[goal];
+		if (goalAtom.negated) continue; // TODO don't know what to do ...
+
+		ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
+	
+	
+		std::vector<int> goalSupporter;
+		for (int pTime = 0; pTime < planLength; pTime++){
+			int goalSuppVar = capsule.new_variable();
+			goalSupporter.push_back(goalSuppVar);
+			DEBUG(capsule.registerVariable(goalSuppVar,
+						"goalSupp#" + to_string(goal) + "-" + to_string(pTime)));
+
+
+			vector<int> achieverSelection;
+			for (size_t j = 0; j < thisGoalAchievers->achievers.size(); j++){
+				Achiever* achiever = thisGoalAchievers->achievers[j];
+				int achieverVar = capsule.new_variable();
+				achieverSelection.push_back(achieverVar);
+				DEBUG(capsule.registerVariable(achieverVar,
+							"goalAchieve#" + to_string(goal) + 
+							"-" + to_string(pTime) + "_" + to_string(j)));
+
+				// if the achiever has been selected then it must be present!
+				implies(solver,achieverVar,actionVars[pTime][achiever->action]);
+				for (size_t k = 0; k < achiever->params.size(); k++){
+					int myConst = goalAtom.args[k]; // my object (main index)
+					int theirParam = achiever->params[k];
+					for(size_t o = 0; o < task.objects.size(); o++){
+						implies(solver,achieverVar,parameterVars[pTime][theirParam][objToIndex[myConst]]);
+					}
+				}
+			}
+			impliesOr(solver,goalSuppVar,achieverSelection);
+		}
+		atLeastOne(solver,capsule,goalSupporter);
+	}
+
+
 
 
 	DEBUG(capsule.printVariables());
 
 	
-	cout << "Starting solver" << endl;
+	DEBUG(cout << "Starting solver" << endl);
 	std::clock_t solver_start = std::clock();
 	int state = ipasir_solve(solver);
 	std::clock_t solver_end = std::clock();
 	double solver_time_in_ms = 1000.0 * (solver_end-solver_start) / CLOCKS_PER_SEC;
-	cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl;
+	DEBUG(cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl);
 	
 	
-	cout << "Solver State: " << state << endl;
+	DEBUG(cout << "Solver State: " << state << endl);
 	if (state == 10){
+#if NDEBUG
+		std::clock_t end = std::clock();
+		double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
+		cout << "Overall time: " << fixed << time_in_ms << "ms   Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
+		return true;
+#endif
 		printVariableTruth(solver,capsule);
 	}
+	else return false;
 
 
 	// extract the plan
@@ -635,14 +708,21 @@ int liftedRP::compute_heuristic_sat(const DBState &s, const Task &task) {
 			}
 		}
 	}
-	exit(0);
-	//return 0;
+	return true;
 }
 
 
 
 int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
-	if (satMode) return compute_heuristic_sat(s,task);
+	if (satMode){
+		std::clock_t start = std::clock();
+		for (int i = 1; i < 100; i++){
+			planLength = i;
+			if (compute_heuristic_sat(s,task,start)){
+				return i;
+			}
+		}
+	}
 
 
 	IloEnv env;
