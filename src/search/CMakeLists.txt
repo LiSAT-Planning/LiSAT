@@ -3,7 +3,12 @@ project(search)
 
 set(CMAKE_CXX_STANDARD 17)
 
-set(CPLEX_SOURCE_DIR /home/dh/programme/CPLEX_Studio1210)
+set(CPLEX_SOURCE_DIR /home/gregor/Workspace/cplex)
+#set(CPLEX_SOURCE_DIR /home/dh/programme/CPLEX_Studio1210)
+
+## required for IBM's CPLEX in order to force it to use newer names for the std headers
+add_definitions(-DIL_STD)
+
 list(APPEND linker_flags "$<$<CONFIG:DEBUG>:-lpthread;-g>" "$<$<CONFIG:RELEASE>:-flto;-lpthread>")
 
 if (CMAKE_CONFIGURATION_TYPES)
@@ -96,7 +101,11 @@ add_executable(search
         lifted_heuristic/rules/join.h lifted_heuristic/rules/product.h lifted_heuristic/rules/project.h
         lifted_heuristic/rule_matcher.cc lifted_heuristic/rule_matcher.h
         lifted_heuristic/grounders/grounder.h
-        lifted_heuristic/grounders/weighted_grounder.cc lifted_heuristic/grounders/weighted_grounder.h search_engines/lazy_search.cc search_engines/lazy_search.h heuristics/liftedRP.cpp heuristics/liftedRP.h)
+        lifted_heuristic/grounders/weighted_grounder.cc lifted_heuristic/grounders/weighted_grounder.h search_engines/lazy_search.cc search_engines/lazy_search.h
+		heuristics/liftedRP.cpp heuristics/liftedRP.h
+		heuristics/sat_encoder.cpp heuristics/sat_encoder.h
+		heuristics/ipasir.h
+		)
 
 add_library(cplex SHARED IMPORTED)
 set_target_properties(cplex  PROPERTIES
@@ -117,6 +126,9 @@ set_target_properties(concert  PROPERTIES
         )
 
 target_link_options(search PUBLIC ${linker_flags})
+
+target_link_libraries(search PRIVATE ipasircryptominisat5)
+
 target_link_libraries(search PRIVATE ilocplex)
 target_link_libraries(search PRIVATE concert)
 target_link_libraries(search PRIVATE cplex)

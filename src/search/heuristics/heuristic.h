@@ -6,6 +6,7 @@
 
 #include <iostream>
 #include <map>
+#include <limits>
 
 const int UNSOLVABLE_STATE = std::numeric_limits<int>::max();
 

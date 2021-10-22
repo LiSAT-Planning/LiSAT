@@ -3,6 +3,8 @@
 //
 
 #include "liftedRP.h"
+#include "sat_encoder.h"
+#include "ipasir.h"
 #include <unordered_set>
 #include <cassert>
 
@@ -193,8 +195,146 @@ liftedRP::liftedRP(const Task task) {
     cout << "- max arity " << maxArity << endl;
 }
 
+
+bool satMode = true;
+
+void printVariableTruth(void* solver, sat_capsule & capsule){
+	for (int v = 1; v <= capsule.number_of_variables; v++){
+		int val = ipasir_val(solver,v);
+	
+		std::string s = std::to_string(v);
+		int x = 4 - s.size();
+		while (x-- && x > 0) std::cout << " ";
+		std::cout << v << ": ";
+		if (val > 0) std::cout << "    ";
+		else         std::cout << "not ";
+#ifndef NDEBUG
+		std::cout << capsule.variableNames[v] << endl; 
+#else
+		std::cout << v << endl;
+#endif
+	}
+}
+
+
+int liftedRP::compute_heuristic_sat(const DBState &s, const Task &task) {
+
+	cout << ipasir_signature() << endl;
+	void* solver = ipasir_init();
+	
+	sat_capsule capsule;
+	reset_number_of_clauses();
+
+
+	// indices: timestep -> parameter -> object
+	std::vector<std::vector<std::vector<int>>> parameterVars;
+	std::vector<std::vector<int>> actionVars;
+
+	for (int time = 0; time < planLength; time++){
+		DEBUG(cout << "Generating time = " << time << endl);
+
+		std::vector<std::vector<int>> parameterVarsTime;
+    	for (int paramter = 0; paramter < maxArity; paramter++){
+			std::vector<int> parameterVarsParameter;
+			for (size_t o = 0; o < task.objects.size(); o++){
+				int objectVar = capsule.new_variable();
+				parameterVarsParameter.push_back(objectVar);
+				DEBUG(capsule.registerVariable(objectVar,
+							"const@" + to_string(time) + "#" + to_string(paramter) + 
+							"-" + task.objects[indexToObj[o]].getName()));
+			}
+			parameterVarsTime.push_back(parameterVarsParameter);
+		}
+		parameterVars.push_back(parameterVarsTime);
+	
+		std::vector<int> actionVarsTime;	
+		for (size_t action = 0; action < task.actions.size(); action++){
+            DEBUG(cout << "\t" << task.actions[action].get_name() << endl);
+
+			int actionVar = capsule.new_variable();
+			actionVarsTime.push_back(actionVar);
+			DEBUG(capsule.registerVariable(actionVar,
+						"action@" + to_string(time) + 
+						"-" + task.actions[action].get_name()));
+
+
+			// typing implications!
+            auto params = task.actions[action].get_parameters();
+            for (int l = 0; l < params.size(); l++) {
+                DEBUG(cout << "\t\t" << task.type_names[params[l].type] << ": ");
+                int lower = lowerTindex[params[l].type];
+                int upper = upperTindex[params[l].type];
+                DEBUG(for (int m = lower; m <= upper; m++) {
+                    cout << task.objects[indexToObj[m]].getName() << " ";
+                }
+                cout << endl);
+
+				for (int i = 0; i < lower; i++){
+					int parameterConstantVar = parameterVars[time][l][i];
+					impliesNot(solver,actionVar,parameterConstantVar);
+				}
+
+				for (int i = upper + 1; i < int(task.objects.size()); i++){
+					int parameterConstantVar = parameterVars[time][l][i];
+					impliesNot(solver,actionVar,parameterConstantVar);
+				}
+
+				std::vector<int> allowed;
+				for (int i = lower; i <= upper; i++){
+					int parameterConstantVar = parameterVars[time][l][i];
+					allowed.push_back(parameterConstantVar);
+				}
+				impliesOr(solver,actionVar,allowed);
+            }
+			// TODO this is actually not necessary ... I will never access these variables anyway
+            for (int l = params.size(); l < maxArity; l++) {
+				impliesAllNot(solver,actionVar,parameterVars[time][l]);
+			}
+		
+		}
+		actionVars.push_back(actionVarsTime);
+		atLeastOne(solver,capsule,actionVarsTime); // XXX: temporary for development
+		atMostOne(solver,capsule,actionVarsTime);
+	}
+	DEBUG(capsule.printVariables());
+
+	
+	int state = ipasir_solve(solver);
+	cout << "Solver State: " << state << endl;
+	if (state == 10){
+		printVariableTruth(solver,capsule);
+	}
+
+
+	// extract the plan
+	for (int time = 0; time < planLength; time++){
+		cout << "timestep " << time << endl;
+		for (size_t action = 0; action < task.actions.size(); action++){
+			int var = actionVars[time][action];
+			if (ipasir_val(solver,var) > 0){
+				cout << "  " << task.actions[action].get_name();
+            	auto params = task.actions[action].get_parameters();
+            	for (size_t l = 0; l < params.size(); l++) {
+					cout << " " << l << ":";
+					for (size_t o = 0; o < task.objects.size(); o++){
+						if (ipasir_val(solver,parameterVars[time][l][o]) > 0)
+							cout << " " << task.objects[indexToObj[o]].getName();
+					}
+				}
+				cout << endl;
+			}
+		}
+	}
+	exit(0);
+}
+
+
+
 int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
-    IloEnv env;
+	if (satMode) return compute_heuristic_sat(s,task);
+
+
+	IloEnv env;
     IloNumVarArray v(env);
     IloModel model(env);
 
