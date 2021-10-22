@@ -197,7 +197,7 @@ liftedRP::liftedRP(const Task task) {
 								
 								int constP = prec.arguments[iArg].index; 
 
-								if (lowerTindex[typeE] > constP || upperTindex[typeE] < constP){
+								if (types[typeE].find(constP) == types[typeE].end()){
 									typesCompatible = false;
 									break;
 								}
@@ -207,7 +207,7 @@ liftedRP::liftedRP(const Task task) {
                             	
 								int constE = eff.arguments[iArg].index;
 
-								if (lowerTindex[typeP] > constE || upperTindex[typeP] < constE){
+								if (types[typeP].find(constE) == types[typeP].end()){
 									typesCompatible = false;
 									break;
 								}
@@ -331,7 +331,7 @@ liftedRP::liftedRP(const Task task) {
 
     cout << "found achievers:" << endl;
     for (int iAction = 0; iAction < task.actions.size(); iAction++) {
-        cout << "- action '" << task.actions[iAction].get_name() << "'";
+        cout << "- action #" << iAction << " '" << task.actions[iAction].get_name() << "'";
         auto precs = task.actions[iAction].get_precondition();
         int numPrecs = precs.size() + setPosNullaryPrec[iAction]->size() + setNegNullaryPrec[iAction]->size();
         cout << ", which has " << numPrecs << " preconditions" << endl;
@@ -603,9 +603,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
     			}
 
 				if (supportingTuples.size() == 0){
-					DEBUG(cout << "\tno init support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
+					DEBUG(cout << "\t\tno init support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 					impliesNot(solver,actionVar,precSupporter[prec][0]); // cannot be supported by init!
 				} else {
+					DEBUG(cout << "\t\tinit support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 					vector<int> suppOptions;
 					for (size_t i = 0; i < supportingTuples.size(); i++){
 						int suppVar = capsule.new_variable();
@@ -638,9 +639,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					ActionPrecAchiever* myAchievers = achievers[action]->precAchievers[prec];
 
 					if (myAchievers->achievers.size() == 0){
-						DEBUG(cout << "\tnon-achievable precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
+						DEBUG(cout << "\t\tnon-achievable precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 						impliesNot(solver,actionVar,precSupporter[prec][i]);
 					} else {
+						DEBUG(cout << "\t\tachievable precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 						vector<int> achieverSelection;
 						for (size_t j = 0; j < myAchievers->achievers.size(); j++){
 							Achiever* achiever = myAchievers->achievers[j];
@@ -659,7 +661,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 									int myParam = precObjec.arguments[k].index; // my index position
 
 									if (theirParam < 0){
-										int theirConst  = -theirConst-1;
+										int theirConst  = -theirParam-1;
 										implies(solver,achieverVar,parameterVars[time][myParam][objToIndex[theirConst]]);
 									} else {
 										for(size_t o = 0; o < task.objects.size(); o++){
@@ -687,6 +689,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		actionVars.push_back(actionVarsTime);
 		atLeastOne(solver,capsule,actionVarsTime); // XXX: temporary for development
 		atMostOne(solver,capsule,actionVarsTime);
+
+		//if (time == 0) assertYes(solver,actionVarsTime[5]);
+		//if (time == 1) assertYes(solver,actionVarsTime[11]);
+		//if (time == 2) assertYes(solver,actionVarsTime[4]);
 	}
 
 	// the goal must be achieved!
@@ -789,13 +795,19 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 	if (satMode){
 		std::clock_t start = std::clock();
-		for (int i = 1; i < 200; i++){
+		for (int i = 1; i < 100; i++){
 			planLength = i;
 			if (compute_heuristic_sat(s,task,start)){
+				//exit(0);
 				return i;
 			} else {
 				cout << "\t\tNo plan of length: " << planLength << endl;
+				std::clock_t end = std::clock();
+				double time_in_ms = 1000.0 * (end-start) / CLOCKS_PER_SEC;
+				if (time_in_ms > 500)
+					return i+1;
 			}
+			//exit(0);
 		}
 		return 100;
 	}
