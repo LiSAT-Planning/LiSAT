@@ -48,6 +48,39 @@ liftedRP::liftedRP(const Task task) {
         }
     }
 
+    // create data structure for nullary precs/effects
+    for (int a = 0; a < task.actions.size(); a++) {
+        setPosNullaryPrec.push_back(new unordered_set<int>);
+        setNegNullaryPrec.push_back(new unordered_set<int>);
+        setPosNullaryEff.push_back(new unordered_set<int>);
+        setNegNullaryEff.push_back(new unordered_set<int>);
+
+        auto posPrec = task.actions[a].get_positive_nullary_precond();
+        for (int f = 0; f < posPrec.size(); f++){
+            if (posPrec[f]){
+                setPosNullaryPrec[a]->insert(f);
+            }
+        }
+        auto negPrec = task.actions[a].get_negative_nullary_precond();
+        for (int f = 0; f < negPrec.size(); f++){
+            if (negPrec[f]){
+                setNegNullaryPrec[a]->insert(f);
+            }
+        }
+        auto posEff = task.actions[a].get_positive_nullary_effects();
+        for (int f = 0; f < posEff.size(); f++){
+            if (posEff[f]){
+                setPosNullaryEff[a]->insert(f);
+            }
+        }
+        auto negEff = task.actions[a].get_negative_nullary_effects();
+        for (int f = 0; f < negEff.size(); f++){
+            if (negEff[f]){
+                setNegNullaryEff[a]->insert(f);
+            }
+        }
+    }
+
     cout << "- building achiever lookup table" << endl;
     // !!! this code assumes the non-sparse (i.e. transitively closed) typing !!!
     for (int iAction = 0; iAction < task.actions.size(); iAction++) {
@@ -101,6 +134,28 @@ liftedRP::liftedRP(const Task task) {
                 }
             }
         }
+        for (int posPrec : *setPosNullaryPrec[iAction]) {
+            achievers[iAction]->posNullaryPrecAchievers[posPrec] = new ActionPrecAchiever;
+            for (int iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+                auto possAchAction = task.actions[iPossibleAch];
+                if (possAchAction.get_positive_nullary_effects()[posPrec]) {
+                    Achiever *ach = new Achiever;
+                    ach->action = iPossibleAch;
+                    achievers[iAction]->posNullaryPrecAchievers[posPrec]->achievers.push_back(ach);
+                }
+            }
+        }
+        for (int negPrec : *setNegNullaryPrec[iAction]) {
+            achievers[iAction]->negNullaryPrecAchievers[negPrec] = new ActionPrecAchiever;
+            for (int iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+                auto possAchAction = task.actions[iPossibleAch];
+                if (possAchAction.get_negative_nullary_effects()[negPrec]) {
+                    Achiever *ach = new Achiever;
+                    ach->action = iPossibleAch;
+                    achievers[iAction]->negNullaryPrecAchievers[negPrec]->achievers.push_back(ach);
+                }
+            }
+        }
     }
 
     // same for goals
@@ -137,12 +192,35 @@ liftedRP::liftedRP(const Task task) {
             }
         }
     }
+    for (int posGoal : task.goal.positive_nullary_goals) {
+        goalAchievers->posNullaryPrecAchievers[posGoal] = new ActionPrecAchiever;
+        for (int iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+            auto possAchAction = task.actions[iPossibleAch];
+            if (possAchAction.get_positive_nullary_effects()[posGoal]) {
+                Achiever *ach = new Achiever;
+                ach->action = iPossibleAch;
+                goalAchievers->posNullaryPrecAchievers[posGoal]->achievers.push_back(ach);
+            }
+        }
+    }
+    for (int negGoal : task.goal.negative_nullary_goals) {
+        goalAchievers->negNullaryPrecAchievers[negGoal] = new ActionPrecAchiever;
+        for (int iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+            auto possAchAction = task.actions[iPossibleAch];
+            if (possAchAction.get_negative_nullary_effects()[negGoal]) {
+                Achiever *ach = new Achiever;
+                ach->action = iPossibleAch;
+                goalAchievers->negNullaryPrecAchievers[negGoal]->achievers.push_back(ach);
+            }
+        }
+    }
 
     cout << "found achievers:" << endl;
     for (int iAction = 0; iAction < task.actions.size(); iAction++) {
         cout << "- action '" << task.actions[iAction].get_name() << "'";
         auto precs = task.actions[iAction].get_precondition();
-        cout << ", which has " << precs.size() << " preconditions" << endl;
+        int numPrecs = precs.size() + setPosNullaryPrec[iAction]->size() + setNegNullaryPrec[iAction]->size();
+        cout << ", which has " << numPrecs << " preconditions" << endl;
         for (int iPrec = 0; iPrec < precs.size(); iPrec++) {
             cout << "  - prec: ";
             if (precs[iPrec].negated) {
@@ -158,6 +236,22 @@ liftedRP::liftedRP(const Task task) {
             }
             if (achs.empty()) {cout << " s0 only.";}
             cout << endl;
+        }
+        for (int iPrec : *setPosNullaryPrec[iAction]) {
+            cout << "  - prec: nullary" << iPrec;
+            auto achs = achievers[iAction]->posNullaryPrecAchievers[iAction][iPrec].achievers;
+            for (auto ach : achs) {
+                auto achieverAction = task.actions[ach->action];
+                cout << endl << "    - '" << achieverAction.get_name() << "'";
+            }
+        }
+        for (int iPrec : *setNegNullaryPrec[iAction]) {
+            cout << "  - prec: not nullary" << iPrec;
+            auto achs = achievers[iAction]->negNullaryPrecAchievers[iAction][iPrec].achievers;
+            for (auto ach : achs) {
+                auto achieverAction = task.actions[ach->action];
+                cout << endl << "    - '" << achieverAction.get_name() << "'";
+            }
         }
     }
 
@@ -178,6 +272,22 @@ liftedRP::liftedRP(const Task task) {
         }
         if (goalAchievers->precAchievers[iGoal]->achievers.empty()) { cout << " s0 only."; }
         cout << endl;
+    }
+    for (int g : task.goal.positive_nullary_goals) {
+        cout << "  - prec: nullary" << g;
+        auto achs = goalAchievers->posNullaryPrecAchievers[g]->achievers;
+        for (auto ach : achs) {
+            auto achieverAction = task.actions[ach->action];
+            cout << endl << "    - '" << achieverAction.get_name() << "'";
+        }
+    }
+    for (int g : task.goal.negative_nullary_goals) {
+        cout << "  - prec: not nullary" << g;
+        auto achs = goalAchievers->negNullaryPrecAchievers[g]->achievers;
+        for (auto ach : achs) {
+            auto achieverAction = task.actions[ach->action];
+            cout << endl << "    - '" << achieverAction.get_name() << "'";
+        }
     }
 
     // make sparse
