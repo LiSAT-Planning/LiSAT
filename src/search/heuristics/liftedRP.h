@@ -28,6 +28,8 @@ struct ActionPrecAchiever {
 struct ActionPrecAchievers {
     // for a single action, it stores for **each precondition** which other action can achieve it
     vector<ActionPrecAchiever*> precAchievers;
+    map<int, ActionPrecAchiever*> posNullaryPrecAchievers;
+    map<int, ActionPrecAchiever*> negNullaryPrecAchievers;
 };
 
 class liftedRP : public Heuristic {
@@ -53,6 +55,12 @@ private:
 
     vector<ActionPrecAchievers*> achievers;
     ActionPrecAchievers* goalAchievers;
+
+    vector<unordered_set<int>*> setPosNullaryPrec;
+    vector<unordered_set<int>*> setNegNullaryPrec;
+    vector<unordered_set<int>*> setPosNullaryEff;
+    vector<unordered_set<int>*> setNegNullaryEff;
+
     int sortObjs(int index, int type);
 public:
 
