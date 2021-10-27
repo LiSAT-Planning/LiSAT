@@ -568,14 +568,15 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			// this means that every precondition is supported by a prior action or the initial state
 	        const auto precs = task.actions[action].get_precondition();
 	        for (int prec = 0; prec < precs.size(); prec++) {
+            	const auto precObjec = precs[prec];
+				int predicate = precObjec.predicate_symbol;
+				if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
+				
+
 				// 1. Step: select the time step which supports
 				impliesOr(solver,actionVar,precSupporter[prec]);
 			
 				// 2. Step: Supporter of type 1: initial state
-            	const auto precObjec = precs[prec];
-				int predicate = precObjec.predicate_symbol;
-
-				
 				vector<vector<int>> supportingTuples;
 
 				// TODO: sind die nicht nach den predikaten sortiert????
@@ -745,14 +746,12 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	DEBUG(capsule.printVariables());
 
 	
-	cout << "Starting solver" << endl;
 	DEBUG(cout << "Starting solver" << endl);
 	std::clock_t solver_start = std::clock();
 	int state = ipasir_solve(solver);
 	std::clock_t solver_end = std::clock();
 	double solver_time_in_ms = 1000.0 * (solver_end-solver_start) / CLOCKS_PER_SEC;
 	DEBUG(cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl);
-	cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl;
 	
 	
 	DEBUG(cout << "Solver State: " << state << endl);
@@ -801,7 +800,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 				//exit(0);
 				return i;
 			} else {
-				cout << "\t\tNo plan of length: " << planLength << endl;
+				DEBUG(cout << "\t\tNo plan of length: " << planLength << endl);
 				std::clock_t end = std::clock();
 				double time_in_ms = 1000.0 * (end-start) / CLOCKS_PER_SEC;
 				if (time_in_ms > 500)
