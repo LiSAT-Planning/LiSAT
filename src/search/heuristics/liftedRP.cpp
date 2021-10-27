@@ -468,20 +468,20 @@ bool liftedRP::atom_not_satisfied(const DBState &s,
     return (!atomicGoal.negated && it==end) || (atomicGoal.negated && it!=end);
 }
 
-bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime) {
+
+vector<vector<int>> goalSupporterVars;
+std::vector<std::vector<std::vector<int>>> parameterVars;
+std::vector<std::vector<int>> actionVars;
+
+
+bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule) {
 
 	//cout << ipasir_signature() << endl;
-	void* solver = ipasir_init();
-	
-	sat_capsule capsule;
-	reset_number_of_clauses();
 
 
 	// indices: timestep -> parameter -> object
-	std::vector<std::vector<std::vector<int>>> parameterVars;
-	std::vector<std::vector<int>> actionVars;
 
-	for (int time = 0; time < planLength; time++){
+	for (int time = planLength-1; time < planLength; time++){
 		DEBUG(cout << "Generating time = " << time << endl);
 
 		std::vector<std::vector<int>> parameterVarsTime;
@@ -690,10 +690,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		actionVars.push_back(actionVarsTime);
 		atLeastOne(solver,capsule,actionVarsTime); // XXX: temporary for development
 		atMostOne(solver,capsule,actionVarsTime);
-
-		//if (time == 0) assertYes(solver,actionVarsTime[5]);
-		//if (time == 1) assertYes(solver,actionVarsTime[11]);
-		//if (time == 2) assertYes(solver,actionVarsTime[4]);
 	}
 
 	// the goal must be achieved!
@@ -706,12 +702,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	
 	
 		std::vector<int> goalSupporter;
-		for (int pTime = 0; pTime < planLength; pTime++){
-			int goalSuppVar = capsule.new_variable();
-			goalSupporter.push_back(goalSuppVar);
-			DEBUG(capsule.registerVariable(goalSuppVar,
-						"goalSupp#" + to_string(goal) + "-" + to_string(pTime)));
-
+		for (int pTime = planLength-1; pTime < planLength; pTime++){
+			int goalSuppVar = goalSupporterVars[goal][pTime];
 
 			vector<int> achieverSelection;
 			for (size_t j = 0; j < thisGoalAchievers->achievers.size(); j++){
@@ -737,7 +729,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			}
 			impliesOr(solver,goalSuppVar,achieverSelection);
 		}
-		atLeastOne(solver,capsule,goalSupporter);
+	
+		// don't use later support ... These assumptions are cleared after each call
+		for (int time = planLength; time < 1000; time++)
+			ipasir_assume(solver,-goalSupporterVars[goal][time]);
 	}
 
 
@@ -746,12 +741,19 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	DEBUG(capsule.printVariables());
 
 	
+	cout << "Starting solver" << endl;
 	DEBUG(cout << "Starting solver" << endl);
 	std::clock_t solver_start = std::clock();
 	int state = ipasir_solve(solver);
 	std::clock_t solver_end = std::clock();
 	double solver_time_in_ms = 1000.0 * (solver_end-solver_start) / CLOCKS_PER_SEC;
 	DEBUG(cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl);
+	cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl;
+
+
+	std::clock_t end = std::clock();
+	double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
+	cout << "Overall time: " << fixed << time_in_ms << "ms   Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
 	
 	
 	DEBUG(cout << "Solver State: " << state << endl);
@@ -794,17 +796,58 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 	if (satMode){
 		std::clock_t start = std::clock();
+		void* solver = ipasir_init();
+		sat_capsule capsule;
+		reset_number_of_clauses();
+		int maxPlanLength = 1000;	
+
+		goalSupporterVars.clear();
+		parameterVars.clear();
+		actionVars.clear();
+
+		// the goal must be achieved!
+		for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
+			const AtomicGoal & goalAtom = task.goal.goal[goal];
+			if (goalAtom.negated) continue; // TODO don't know what to do ...
+			if (!atom_not_satisfied(s,goalAtom)) continue; // goal is satisfied so we don't have to achieve it via actions
+	
+			ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
+		
+			std::vector<int> goalSupporter;
+			for (int pTime = 0; pTime < maxPlanLength; pTime++){
+				int goalSuppVar = capsule.new_variable();
+				goalSupporter.push_back(goalSuppVar);
+				DEBUG(capsule.registerVariable(goalSuppVar,
+							"goalSupp#" + to_string(goal) + "-" + to_string(pTime)));
+	
+			}
+			atLeastOne(solver,capsule,goalSupporter);
+			goalSupporterVars.push_back(goalSupporter);
+		}
+
+
+
+
+
+		
 		for (int i = 1; i < 100; i++){
 			planLength = i;
-			if (compute_heuristic_sat(s,task,start)){
+			
+			
+			if (compute_heuristic_sat(s,task,start,solver,capsule)){
 				//exit(0);
+				ipasir_release(solver);
 				return i;
 			} else {
+				cout << "\t\tNo plan of length: " << planLength << endl;
 				DEBUG(cout << "\t\tNo plan of length: " << planLength << endl);
 				std::clock_t end = std::clock();
 				double time_in_ms = 1000.0 * (end-start) / CLOCKS_PER_SEC;
-				if (time_in_ms > 500)
+				cout << "Total time: " << fixed << time_in_ms << "ms" << endl;
+				if (time_in_ms > 50000){
+					ipasir_release(solver);
 					return i+1;
+				}
 			}
 			//exit(0);
 		}
