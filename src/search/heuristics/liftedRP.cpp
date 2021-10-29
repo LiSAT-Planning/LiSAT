@@ -508,10 +508,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 	for (int time = planLength-1; time < planLength; time++){
 		DEBUG(cout << "Generating time = " << time << endl);
-
-
-		cout << "Parameter arity " << maxArity << " Objects " << task.objects.size() << endl;
-
 		int varA = capsule.number_of_variables;
 		int claA = get_number_of_clauses();
 
@@ -569,8 +565,9 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								"@" + to_string(pTime) + "#" + to_string(paramterBefore)));
 					
 					for(size_t o = 0; o < task.objects.size(); o++){
-						andImplies(solver,equalsVar,parameterVars[time][paramterThis][o], parameterVars[pTime][paramterBefore][o]);
-						andImplies(solver,equalsVar, parameterVars[pTime][paramterBefore][o],parameterVars[time][paramterThis][o]);
+						andImplies(solver,equalsVar, parameterVars[time][paramterThis][o], parameterVars[pTime][paramterBefore][o]);
+						andImplies(solver,equalsVar, parameterVars[pTime][paramterBefore][o], parameterVars[time][paramterThis][o]);
+						andImplies(solver,parameterVars[pTime][paramterBefore][o], parameterVars[time][paramterThis][o], equalsVar);
 					}
 				}
 				equalVarsP.push_back(equalVarsB);
@@ -796,9 +793,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					int theirParam = achiever->params[k];
 
 					if (theirParam >= 0){
-						for(size_t o = 0; o < task.objects.size(); o++){
-							implies(solver,achieverVar,parameterVars[pTime][theirParam][objToIndex[myConst]]);
-						}
+						implies(solver,achieverVar,parameterVars[pTime][theirParam][objToIndex[myConst]]);
 					} // else it is a constant and has already been checked
 				}
 			}
@@ -806,7 +801,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		}
 	
 		// don't use later support ... These assumptions are cleared after each call
-		for (int time = planLength; time < 1000; time++)
+		for (size_t time = planLength; time < goalSupporterVars[goal].size(); time++)
 			ipasir_assume(solver,-goalSupporterVars[goal][time]);
 	}
 
@@ -816,19 +811,17 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	DEBUG(capsule.printVariables());
 
 	
-	cout << "Starting solver" << endl;
 	DEBUG(cout << "Starting solver" << endl);
 	std::clock_t solver_start = std::clock();
 	int state = ipasir_solve(solver);
 	std::clock_t solver_end = std::clock();
 	double solver_time_in_ms = 1000.0 * (solver_end-solver_start) / CLOCKS_PER_SEC;
 	DEBUG(cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl);
-	cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl;
 	solverTotal += solver_time_in_ms;
 
 	std::clock_t end = std::clock();
 	double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
-	cout << "Overall time: " << fixed << time_in_ms << "ms   Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
+	cout << "Overall time: " << fixed << time_in_ms << "ms of that Solver: " << solverTotal << "   Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
 	
 	
 	DEBUG(cout << "Solver State: " << state << endl);
@@ -870,6 +863,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 	if (satMode){
+		DEBUG(cout << "Parameter arity " << maxArity << " Objects " << task.objects.size() << endl);
+		
 		std::clock_t start = std::clock();
 		void* solver = ipasir_init();
 		sat_capsule capsule;
@@ -882,14 +877,23 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 		actionVars.clear();
 
 		// the goal must be achieved!
+		int gc= 0;
 		for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
 			const AtomicGoal & goalAtom = task.goal.goal[goal];
-			if (goalAtom.negated) continue; // TODO don't know what to do ...
-			if (!atom_not_satisfied(s,goalAtom)) continue; // goal is satisfied so we don't have to achieve it via actions
+			std::vector<int> goalSupporter;
+			
+			if (goalAtom.negated) {
+				goalSupporterVars.push_back(goalSupporter);
+				continue; // TODO don't know what to do ...
+			}
+			if (!atom_not_satisfied(s,goalAtom)) {
+				goalSupporterVars.push_back(goalSupporter);
+				continue; // goal is satisfied so we don't have to achieve it via actions
+			}
+			gc++;
 	
 			ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
 		
-			std::vector<int> goalSupporter;
 			for (int pTime = 0; pTime < maxPlanLength; pTime++){
 				int goalSuppVar = capsule.new_variable();
 				goalSupporter.push_back(goalSuppVar);
@@ -901,9 +905,12 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 			goalSupporterVars.push_back(goalSupporter);
 		}
 
+		// we only test executable plans and if the goal is a dead end ...
+		if (!gc) return 0;
+
 
 		// start the incremental search for a plan	
-		for (int i = 1; i < 100; i++){
+		for (int i = 1; i < 500; i++){
 			planLength = i;
 			
 			if (compute_heuristic_sat(s,task,start,solver,capsule)){
@@ -915,15 +922,15 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 				DEBUG(cout << "\t\tNo plan of length: " << planLength << endl);
 				std::clock_t end = std::clock();
 				double time_in_ms = 1000.0 * (end-start) / CLOCKS_PER_SEC;
-				cout << "Total time: " << fixed << time_in_ms << "ms" << endl;
-				if (time_in_ms > 100){
+				//cout << "Total time: " << fixed << time_in_ms << "ms" << endl;
+				if (time_in_ms > 1000){
 					ipasir_release(solver);
 					return i+1;
 				}
 			}
 			//exit(0);
 		}
-		return 100;
+		return 501;
 	}
 
 
