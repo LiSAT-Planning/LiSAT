@@ -161,6 +161,14 @@ void andImplies(void* solver, int i, int j, int k){
 	number_of_clauses++;
 }
 
+void andImpliesNot(void* solver, int i, int j, int k){
+	ipasir_add(solver,-i);
+	ipasir_add(solver,-j);
+	ipasir_add(solver,-k);
+	ipasir_add(solver,0);
+	number_of_clauses++;
+}
+
 void andImplies(void* solver, int i, int j, int k, int l){
 	ipasir_add(solver,-i);
 	ipasir_add(solver,-j);

@@ -52,13 +52,14 @@ liftedRP::liftedRP(const Task task) {
         for (int i = 0; i < oTypes.size(); i++) {
             int j = oTypes[i];
             types[j].insert(obj);
+			cout << "object " << obj << " " << j << " " << task.type_names[j] << endl;
         }
     }
     unordered_set<int> parents[numTypes];
     for (int child = 0; child < numTypes; child++) {
         for (int parent = 0; parent < numTypes; parent++) {
             if (child == parent) continue;
-            if (types[child].size() < types[parent].size()) {
+            if (types[child].size() <= types[parent].size()) {
                 bool isSubset = true;
                 for (int elem: types[child]) {
                     if (types[parent].find(elem) == types[parent].end()) {
@@ -106,8 +107,20 @@ liftedRP::liftedRP(const Task task) {
         }
     }
 
+
+    // make directional if there are multiple identical types
+	for (int i = 0; i < numTypes; i++) {
+        for (int j = 0; j < numTypes; j++) {
+            if (i == j) continue;
+                if ((parents[i].find(j) != parents[i].end())
+                    && (parents[j].find(i) != parents[j].end())) {
+                    parents[i].erase(parents[i].find(j));
+                }
+		}
+	}
+    
     // make sparse
-    for (int i = 0; i < numTypes; i++) {
+	for (int i = 0; i < numTypes; i++) {
         for (int j = 0; j < numTypes; j++) {
             if (i == j) continue;
             for (int k = 0; k < numTypes; k++) {
@@ -596,7 +609,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		int varD = capsule.number_of_variables;
 		int claD = get_number_of_clauses();
 
-
 			// typing implications!
             auto params = task.actions[action].get_parameters();
             for (int l = 0; l < params.size(); l++) {
@@ -625,6 +637,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				}
 				impliesOr(solver,actionVar,allowed);
             }
+
+
 			// TODO this is actually not necessary ... I will never access these variables anyway
             for (int l = params.size(); l < maxArity; l++) {
 				impliesAllNot(solver,actionVar,parameterVars[time][l]);
@@ -658,8 +672,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							impliesNot(solver,actionVar, parameterVars[time][0][myObjIndex]);
 						} else {
 							for(size_t o = 0; o < task.objects.size(); o++){
-								impliesNot(solver,parameterVars[time][0][o], parameterVars[time][1][o]);
-								impliesNot(solver,parameterVars[time][1][o], parameterVars[time][0][o]);
+								andImpliesNot(solver,actionVar,parameterVars[time][0][o], parameterVars[time][1][o]);
+								andImpliesNot(solver,actionVar,parameterVars[time][1][o], parameterVars[time][0][o]);
 							}
 						}
 					} else {
@@ -672,8 +686,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							implies(solver,actionVar, parameterVars[time][0][myObjIndex]);
 						} else {
 							for(size_t o = 0; o < task.objects.size(); o++){
-								implies(solver,parameterVars[time][0][o], parameterVars[time][1][o]);
-								implies(solver,parameterVars[time][1][o], parameterVars[time][0][o]);
+								andImplies(solver,actionVar,parameterVars[time][0][o], parameterVars[time][1][o]);
+								andImplies(solver,actionVar,parameterVars[time][1][o], parameterVars[time][0][o]);
 							}
 						}
 					}
@@ -872,9 +886,12 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	
 		// don't use later support ... These assumptions are cleared after each call
 		
+		//if (planLength != 3) continue;
 		for (size_t time = planLength; time < goalSupporterVars[goal].size(); time++)
 			ipasir_assume(solver,-goalSupporterVars[goal][time]);
 	}
+		
+	//if (planLength != 3) return false;
 
 
 	DEBUG(capsule.printVariables());
@@ -891,7 +908,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
 	cout << "Overall time: " << fixed << time_in_ms << "ms of that Solver: " << solverTotal << "ms   Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
 	
-	
+
 	DEBUG(cout << "Solver State: " << state << endl);
 	if (state == 10){
 #if NDEBUG
@@ -936,7 +953,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 		void* solver = ipasir_init();
 		sat_capsule capsule;
 		reset_number_of_clauses();
-		int maxPlanLength = 10;
+		int maxPlanLength = 5;
 		solverTotal = 0;
 
 		goalSupporterVars.clear();
@@ -977,7 +994,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 
 
 		// start the incremental search for a plan	
-		for (int i = 1; i < 500; i++){
+		for (int i = 1; i < 100; i++){
 			planLength = i;
 			
 			if (compute_heuristic_sat(s,task,start,solver,capsule)){
