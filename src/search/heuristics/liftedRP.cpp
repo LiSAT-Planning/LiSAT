@@ -121,6 +121,7 @@ liftedRP::liftedRP(const Task task) {
         }
     }
 
+	DEBUG(
     for (int i = 0; i < numTypes; i++) {
         cout << task.type_names[i] << " -> {";
         bool first = true;
@@ -133,7 +134,7 @@ liftedRP::liftedRP(const Task task) {
             cout << task.type_names[p];
         }
         cout << "}" << endl;
-    }
+    });
 
     children = new unordered_set<int>[numTypes];
     ps = new unordered_set<int>[numTypes];
@@ -160,6 +161,7 @@ liftedRP::liftedRP(const Task task) {
         r = sortObjs(r, t);
     }
 
+	DEBUG(
     for (int i = 0; i < task.objects.size(); i++) {
         cout << task.objects[i].getName() << " ";
     }
@@ -176,6 +178,7 @@ liftedRP::liftedRP(const Task task) {
         }
         cout << "}" << endl;
     }
+	);
 
 
     cout << "- building achiever lookup table" << endl;
@@ -378,7 +381,7 @@ liftedRP::liftedRP(const Task task) {
         }
         for (int iPrec : *setPosNullaryPrec[iAction]) {
             cout << "  - prec: nullary" << iPrec;
-            auto achs = achievers[iAction]->posNullaryPrecAchievers[iAction][iPrec].achievers;
+            auto achs = achievers[iAction]->posNullaryPrecAchievers[iPrec]->achievers;
             for (auto ach : achs) {
                 auto achieverAction = task.actions[ach->action];
                 cout << endl << "    - '" << achieverAction.get_name() << "'";
@@ -386,7 +389,7 @@ liftedRP::liftedRP(const Task task) {
         }
         for (int iPrec : *setNegNullaryPrec[iAction]) {
             cout << "  - prec: not nullary" << iPrec;
-            auto achs = achievers[iAction]->negNullaryPrecAchievers[iAction][iPrec].achievers;
+            auto achs = achievers[iAction]->negNullaryPrecAchievers[iPrec]->achievers;
             for (auto ach : achs) {
                 auto achieverAction = task.actions[ach->action];
                 cout << endl << "    - '" << achieverAction.get_name() << "'";
@@ -437,6 +440,7 @@ liftedRP::liftedRP(const Task task) {
         cout << i << " " << task.predicates[i].getName() << endl;
     }
 
+	DEBUG(
     cout << endl << "Initial state (static):" << endl;
     for (int i = 0; i < task.get_static_info().get_relations().size(); i++) {
         auto rel = task.get_static_info().get_relations()[i];
@@ -462,6 +466,7 @@ liftedRP::liftedRP(const Task task) {
             cout <<")" << endl;
         }
     }
+	);
 }
 
 
@@ -713,17 +718,38 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						impliesNot(solver,actionVar,precSupporter[prec][i]);
 					} else {
 						DEBUG(cout << "\t\tachievable precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
+						
+						// check if achiever have disjunct predicates
+						unordered_set<int> setset;
+						for (size_t j = 0; j < myAchievers->achievers.size(); j++)
+							setset.insert(myAchievers->achievers[j]->action);
+						
+						bool allDifferentActions = false;
+						if (setset.size() == myAchievers->achievers.size())
+							allDifferentActions = true;
+						
+						
 						vector<int> achieverSelection;
 						for (size_t j = 0; j < myAchievers->achievers.size(); j++){
 							Achiever* achiever = myAchievers->achievers[j];
-							int achieverVar = capsule.new_variable();
-							achieverSelection.push_back(achieverVar);
-							DEBUG(capsule.registerVariable(achieverVar,
-										"preAchieve@" + to_string(time) + "#" + to_string(action) + 
-										"-" + to_string(i) + "_" + to_string(j)));
+							
+							int achieverVar = 0;
+							if (! allDifferentActions){
+								achieverVar = capsule.new_variable();
+								DEBUG(capsule.registerVariable(achieverVar,
+											"preAchieve@" + to_string(time) + "#" + to_string(action) + 
+											"-" + to_string(i) + "_" + to_string(j)));
 
-							// if the achiever has been selected then it must be present!
-							implies(solver,achieverVar,actionVars[i-1][achiever->action]);
+								// if the achiever has been selected then it must be present!
+								implies(solver,achieverVar,actionVars[i-1][achiever->action]);
+							
+							} else {
+								// the action var plays the role of the achiever var
+								achieverVar = actionVars[i-1][achiever->action];
+							}
+							achieverSelection.push_back(achieverVar);
+							
+							
 							for (size_t k = 0; k < achiever->params.size(); k++){
 								int theirParam = achiever->params[k];
 								
@@ -732,16 +758,27 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 									if (theirParam < 0){
 										int theirConst  = -theirParam-1;
-										implies(solver,achieverVar,parameterVars[time][myParam][objToIndex[theirConst]]);
+										if (!allDifferentActions)
+											implies(solver,achieverVar,parameterVars[time][myParam][objToIndex[theirConst]]);
+										else
+											andImplies(solver,actionVar,precSupporter[prec][i],achieverVar,parameterVars[time][myParam][objToIndex[theirConst]]);
 									} else {
-										implies(solver,achieverVar,parameterEquality[myParam][i-1][theirParam]);
+										
+										if (!allDifferentActions)
+											implies(solver,achieverVar,parameterEquality[myParam][i-1][theirParam]);
+										else
+											andImplies(solver,actionVar,precSupporter[prec][i],achieverVar,parameterEquality[myParam][i-1][theirParam]);
 									}
 								} else {
 									// my param is a const
 									int myConst = precObjec.arguments[k].index; // my const ID
 									
 									if (theirParam >= 0){
-										implies(solver,achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst]]);
+
+										if (!allDifferentActions)
+											implies(solver,achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst]]);
+										else
+											andImplies(solver,actionVar,precSupporter[prec][i],achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst]]);
 									
 									} // else two constants, this has been checked statically
 								}
@@ -760,7 +797,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			//cout << "\t\t\tVE " << fixed << setw(8) << varF - varE << " " << setw(8) << claF - claE << " " << task.actions[action].get_name() << endl;
 		}
 		actionVars.push_back(actionVarsTime);
-		atLeastOne(solver,capsule,actionVarsTime); // XXX: temporary for development
+		atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
 		atMostOne(solver,capsule,actionVarsTime);
 	}
 
@@ -793,7 +830,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					int theirParam = achiever->params[k];
 
 					if (theirParam >= 0){
-						implies(solver,achieverVar,parameterVars[pTime][theirParam][objToIndex[myConst]]);
+						implies(solver,achieverVar, parameterVars[pTime][theirParam][objToIndex[myConst]]);
 					} // else it is a constant and has already been checked
 				}
 			}
@@ -810,7 +847,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 	DEBUG(capsule.printVariables());
 
-	
 	DEBUG(cout << "Starting solver" << endl);
 	std::clock_t solver_start = std::clock();
 	int state = ipasir_solve(solver);
@@ -821,7 +857,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 	std::clock_t end = std::clock();
 	double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
-	cout << "Overall time: " << fixed << time_in_ms << "ms of that Solver: " << solverTotal << "   Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
+	cout << "Overall time: " << fixed << time_in_ms << "ms of that Solver: " << solverTotal << "ms   Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
 	
 	
 	DEBUG(cout << "Solver State: " << state << endl);
@@ -829,7 +865,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 #if NDEBUG
 		std::clock_t end = std::clock();
 		double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
-		cout << "Overall time: " << fixed << time_in_ms << "ms of that Solver: " << solverTotal << "ms  Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
 		return true;
 #endif
 		printVariableTruth(solver,capsule);
@@ -915,6 +950,8 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 			
 			if (compute_heuristic_sat(s,task,start,solver,capsule)){
 				ipasir_release(solver);
+				cout << "\t\tPlan of length: " << planLength << endl;
+				DEBUG(cout << "\t\tPlan of length: " << planLength << endl);
 				//exit(0);
 				return i;
 			} else {
@@ -923,7 +960,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 				std::clock_t end = std::clock();
 				double time_in_ms = 1000.0 * (end-start) / CLOCKS_PER_SEC;
 				//cout << "Total time: " << fixed << time_in_ms << "ms" << endl;
-				if (time_in_ms > 1000){
+				if (time_in_ms > 3000000){
 					ipasir_release(solver);
 					return i+1;
 				}
