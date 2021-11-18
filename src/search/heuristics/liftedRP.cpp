@@ -646,6 +646,39 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				int predicate = precObjec.predicate_symbol;
 				if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
 				
+				
+				if (task.predicates[predicate].getName().rfind("=", 0) == 0){
+					if (precObjec.negated){
+						// not equals
+						if (precObjec.arguments[0].constant){
+							int myObjIndex = objToIndex[precObjec.arguments[0].index];
+							impliesNot(solver,actionVar, parameterVars[time][1][myObjIndex]);
+						} else if (precObjec.arguments[1].constant){
+							int myObjIndex = objToIndex[precObjec.arguments[1].index];
+							impliesNot(solver,actionVar, parameterVars[time][0][myObjIndex]);
+						} else {
+							for(size_t o = 0; o < task.objects.size(); o++){
+								impliesNot(solver,parameterVars[time][0][o], parameterVars[time][1][o]);
+								impliesNot(solver,parameterVars[time][1][o], parameterVars[time][0][o]);
+							}
+						}
+					} else {
+						// equals	
+						if (precObjec.arguments[0].constant){
+							int myObjIndex = objToIndex[precObjec.arguments[0].index];
+							implies(solver,actionVar, parameterVars[time][1][myObjIndex]);
+						} else if (precObjec.arguments[1].constant){
+							int myObjIndex = objToIndex[precObjec.arguments[1].index];
+							implies(solver,actionVar, parameterVars[time][0][myObjIndex]);
+						} else {
+							for(size_t o = 0; o < task.objects.size(); o++){
+								implies(solver,parameterVars[time][0][o], parameterVars[time][1][o]);
+								implies(solver,parameterVars[time][1][o], parameterVars[time][0][o]);
+							}
+						}
+					}
+					continue;
+				}
 
 				// 1. Step: select the time step which supports
 				impliesOr(solver,actionVar,precSupporter[prec]);
@@ -838,11 +871,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		}
 	
 		// don't use later support ... These assumptions are cleared after each call
+		
 		for (size_t time = planLength; time < goalSupporterVars[goal].size(); time++)
 			ipasir_assume(solver,-goalSupporterVars[goal][time]);
 	}
-
-
 
 
 	DEBUG(capsule.printVariables());
@@ -904,7 +936,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 		void* solver = ipasir_init();
 		sat_capsule capsule;
 		reset_number_of_clauses();
-		int maxPlanLength = 1000;
+		int maxPlanLength = 10;
 		solverTotal = 0;
 
 		goalSupporterVars.clear();
@@ -967,6 +999,8 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 			}
 			//exit(0);
 		}
+		//exit(0);
+		ipasir_release(solver);
 		return 501;
 	}
 
