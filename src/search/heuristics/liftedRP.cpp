@@ -674,8 +674,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							impliesNot(solver,actionVar, parameterVars[time][0][myObjIndex]);
 						} else {
 							for(size_t o = 0; o < task.objects.size(); o++){
-								andImpliesNot(solver,actionVar,parameterVars[time][0][o], parameterVars[time][1][o]);
-								andImpliesNot(solver,actionVar,parameterVars[time][1][o], parameterVars[time][0][o]);
+								andImpliesNot(solver,actionVar,parameterVars[time][precObjec.arguments[0].index][o], parameterVars[time][precObjec.arguments[1].index][o]);
+								//andImpliesNot(solver,actionVar,parameterVars[time][precObjec.arguments[1].index][o], parameterVars[time][precObjec.arguments[0].index][o]);
 							}
 						}
 					} else {
@@ -688,8 +688,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							implies(solver,actionVar, parameterVars[time][0][myObjIndex]);
 						} else {
 							for(size_t o = 0; o < task.objects.size(); o++){
-								andImplies(solver,actionVar,parameterVars[time][0][o], parameterVars[time][1][o]);
-								andImplies(solver,actionVar,parameterVars[time][1][o], parameterVars[time][0][o]);
+								andImplies(solver,actionVar,parameterVars[time][precObjec.arguments[0].index][o], parameterVars[time][precObjec.arguments[1].index][o]);
+								andImplies(solver,actionVar,parameterVars[time][precObjec.arguments[1].index][o], parameterVars[time][precObjec.arguments[0].index][o]);
 							}
 						}
 					}
