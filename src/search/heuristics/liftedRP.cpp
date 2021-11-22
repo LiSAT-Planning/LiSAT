@@ -5,6 +5,8 @@
 #include "liftedRP.h"
 #include "sat_encoder.h"
 #include "ipasir.h"
+#include "../action.h"
+#include "../search_engines/utils.h"
 #include <unordered_set>
 #include <cassert>
 #include <chrono>
@@ -671,7 +673,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				impliesOr(solver,actionVar,precSupporter[prec]);
 			
 				// 2. Step: Supporter of type 1: initial state
-				vector<vector<int>> supportingTuples;
+				vector<pair<vector<int>,bool>> supportingTuples;
 
 				// TODO: sind die nicht nach den predikaten sortiert????
     			for (int i = 0; i < task.get_static_info().get_relations().size(); i++) {
@@ -682,7 +684,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					
 					// this is the correct predicate
     			    for (vector<int> groundA: tuple) {
-    			    	supportingTuples.push_back(groundA);
+    			    	supportingTuples.push_back({groundA,true});
 					}
     			}
 
@@ -693,9 +695,13 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					if (predicate != rel.predicate_symbol) continue;
     			    
 					for (vector<int> groundA: tuple) {
-    			    	supportingTuples.push_back(groundA);
+    			    	supportingTuples.push_back({groundA,false});
     			    }
     			}
+				
+				
+				// achiever structure contains both achievers and deleters
+				ActionPrecAchiever* myAchievers = achievers[action]->precAchievers[prec];
 
 				if (supportingTuples.size() == 0){
 					DEBUG(cout << "\t\tno init support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
@@ -707,14 +713,14 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						int suppVar = capsule.new_variable();
 						suppOptions.push_back(suppVar);
 						DEBUG(capsule.registerVariable(suppVar,
-									"preSupp@" + to_string(time) + "#" + to_string(action) + 
+									"initAchiever@" + to_string(time) + "#" + to_string(action) + 
 									"-" + to_string(-1) + "_" + to_string(i)));
 					}
 					// one supporter must be chosen
 					impliesOr(solver,actionVar,precSupporter[prec][0],suppOptions);
 
 					for (size_t i = 0; i < supportingTuples.size(); i++){
-						vector<int> tuple = supportingTuples[i];
+						vector<int> tuple = supportingTuples[i].first;
 
 						for (size_t j = 0; j < tuple.size(); j++){
 							int myObjIndex = objToIndex[tuple[j]];
@@ -726,11 +732,45 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								implies(solver,suppOptions[i], parameterVars[time][myParam][myObjIndex]);
 							}
 						}
+
+						// if init fact is not static, it may not be destroyed on the way ...
+						if (!supportingTuples[i].second){
+							for (size_t prevTime = 0; prevTime < planLength-1; prevTime++){
+								for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
+									Achiever* deleter = myAchievers->destroyers[del];
+
+									set<int> criticalVars;
+									bool noNeed = false; // if the deleting effect is statically unequal to the tuple we don't have to check it
+									criticalVars.insert(actionVars[prevTime][deleter->action]);
+						
+									for (size_t j = 0; j < tuple.size(); j++){
+										int myObjIndex = objToIndex[tuple[j]];
+										
+										int deleterParam = deleter->params[j];
+										if (deleterParam < 0){
+											// its a constant!
+											int deleterConst = -deleterParam-1;
+
+											if (deleterConst != myObjIndex){
+												noNeed = true;
+											}
+											//else equals no nothing to assert
+										} else
+											criticalVars.insert(parameterVars[prevTime][deleterParam][myObjIndex]);
+									}
+
+									if (noNeed) continue;
+
+									criticalVars.insert(suppOptions[i]);
+
+									notAll(solver,criticalVars);
+								}
+							}
+						}
 					}
 				}
 
 				// 3. Step: Supporter of type 2: other actions
-				ActionPrecAchiever* myAchievers = achievers[action]->precAchievers[prec];
 				for (int i = 1; i < precSupporter[prec].size(); i++){
 
 					if (myAchievers->achievers.size() == 0){
@@ -801,6 +841,58 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 											andImplies(solver,actionVar,precSupporter[prec][i],achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst]]);
 									
 									} // else two constants, this has been checked statically
+								}
+							}
+
+
+
+							// no deleter in between
+							for (int deleterTime = i-1; deleterTime < planLength - 1; deleterTime++){
+								for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
+									Achiever* deleter = myAchievers->destroyers[del];
+
+									set<int> criticalVars;
+									bool noNeed = false; // if the deleting effect is statically unequal to the tuple we don't have to check it
+									criticalVars.insert(actionVars[deleterTime][deleter->action]);
+						
+									for (size_t k = 0; k < achiever->params.size(); k++){
+										int deleterParam = deleter->params[k];
+										
+										if (!precObjec.arguments[k].constant){
+											int myParam = precObjec.arguments[k].index; // my index position
+											
+											// both are actual variables
+											if (deleterParam > 0){
+												criticalVars.insert(parameterEquality[myParam][deleterTime][deleterParam]);
+											} else {
+												// deleter is a constant
+												int deleterConst  = -deleterParam-1;
+												criticalVars.insert(parameterVars[time][myParam][objToIndex[deleterConst]]);
+											}
+										} else {
+											int myConst = precObjec.arguments[k].index; // my index position
+											
+											// deleter is a variable
+											if (deleterParam > 0){
+												criticalVars.insert(parameterVars[deleterTime][deleterParam][objToIndex[myConst]]);
+											} else if (myConst != -deleterParam-1)
+												noNeed = true;
+											//else equals no nothing to assert
+										}
+									}
+
+									if (noNeed) continue;
+									criticalVars.insert(achieverVar);
+									
+									if (allDifferentActions){
+										criticalVars.insert(actionVar);
+										criticalVars.insert(precSupporter[prec][i]);
+									}
+									//cout << "CRIT";
+									//for (int x : criticalVars)
+									//	cout << " " << x;
+									//cout << endl;
+									notAll(solver,criticalVars);
 								}
 							}
 						}
@@ -878,32 +970,44 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 #if NDEBUG
 		std::clock_t end = std::clock();
 		double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
-		return true;
+		//return true;
 #endif
-		printVariableTruth(solver,capsule);
+		//printVariableTruth(solver,capsule);
 	}
 	else return false;
 
 
 	// extract the plan
+	vector<LiftedOperatorId> plan;
 	for (int time = 0; time < planLength; time++){
 		cout << "timestep " << time << endl;
 		for (size_t action = 0; action < task.actions.size(); action++){
 			int var = actionVars[time][action];
 			if (ipasir_val(solver,var) > 0){
+
 				cout << "  " << task.actions[action].get_name();
             	auto params = task.actions[action].get_parameters();
+				vector<int> arguments;
             	for (size_t l = 0; l < params.size(); l++) {
 					cout << " " << l << ":";
 					for (size_t o = 0; o < task.objects.size(); o++){
-						if (ipasir_val(solver,parameterVars[time][l][o]) > 0)
+						if (ipasir_val(solver,parameterVars[time][l][o]) > 0){
 							cout << " " << task.objects[indexToObj[o]].getName();
+							arguments.push_back(indexToObj[o]);
+						}
 					}
 				}
 				cout << endl;
+				
+				LiftedOperatorId op (action, move(arguments));
+				plan.push_back(op);
 			}
 		}
 	}
+
+	print_plan(plan,task);
+	cout << "Solution found." << endl;
+	exit(0);
 	return true;
 }
 
