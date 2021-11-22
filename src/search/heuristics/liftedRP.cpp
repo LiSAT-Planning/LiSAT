@@ -492,6 +492,7 @@ void printVariableTruth(void* solver, sat_capsule & capsule){
 	
 		std::string s = std::to_string(v);
 		int x = 4 - s.size();
+		cout << "TRUTH ";
 		while (x-- && x > 0) std::cout << " ";
 		std::cout << v << ": ";
 		if (val > 0) std::cout << "    ";
@@ -851,9 +852,9 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
 									Achiever* deleter = myAchievers->destroyers[del];
 
-									set<int> criticalVars;
+									vector<int> criticalVars;
 									bool noNeed = false; // if the deleting effect is statically unequal to the tuple we don't have to check it
-									criticalVars.insert(actionVars[deleterTime][deleter->action]);
+									criticalVars.push_back(actionVars[deleterTime][deleter->action]);
 						
 									for (size_t k = 0; k < achiever->params.size(); k++){
 										int deleterParam = deleter->params[k];
@@ -862,19 +863,19 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 											int myParam = precObjec.arguments[k].index; // my index position
 											
 											// both are actual variables
-											if (deleterParam > 0){
-												criticalVars.insert(parameterEquality[myParam][deleterTime][deleterParam]);
+											if (deleterParam >= 0){
+												criticalVars.push_back(parameterEquality[myParam][deleterTime][deleterParam]);
 											} else {
 												// deleter is a constant
 												int deleterConst  = -deleterParam-1;
-												criticalVars.insert(parameterVars[time][myParam][objToIndex[deleterConst]]);
+												criticalVars.push_back(parameterVars[time][myParam][objToIndex[deleterConst]]);
 											}
 										} else {
 											int myConst = precObjec.arguments[k].index; // my index position
 											
 											// deleter is a variable
-											if (deleterParam > 0){
-												criticalVars.insert(parameterVars[deleterTime][deleterParam][objToIndex[myConst]]);
+											if (deleterParam >= 0){
+												criticalVars.push_back(parameterVars[deleterTime][deleterParam][objToIndex[myConst]]);
 											} else if (myConst != -deleterParam-1)
 												noNeed = true;
 											//else equals no nothing to assert
@@ -882,17 +883,19 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 									}
 
 									if (noNeed) continue;
-									criticalVars.insert(achieverVar);
+									criticalVars.push_back(achieverVar);
 									
 									if (allDifferentActions){
-										criticalVars.insert(actionVar);
-										criticalVars.insert(precSupporter[prec][i]);
+										criticalVars.push_back(actionVar);
+										criticalVars.push_back(precSupporter[prec][i]);
 									}
-									//cout << "CRIT";
-									//for (int x : criticalVars)
-									//	cout << " " << x;
-									//cout << endl;
-									notAll(solver,criticalVars);
+									cout << "CRIT";
+									for (int x : criticalVars)
+										cout << " " << x << " " << capsule.variableNames[x];
+									cout << endl;
+
+									set<int> temp(criticalVars.begin(), criticalVars.end());
+									notAll(solver,temp);
 								}
 							}
 						}
@@ -972,7 +975,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
 		//return true;
 #endif
-		//printVariableTruth(solver,capsule);
+		printVariableTruth(solver,capsule);
 	}
 	else return false;
 
