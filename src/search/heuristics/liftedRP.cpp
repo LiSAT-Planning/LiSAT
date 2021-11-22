@@ -47,15 +47,14 @@ liftedRP::liftedRP(const Task task) {
     cout << "- re-inferring type hierarchy..." << endl;
     int numTypes = task.type_names.size();
     types = new unordered_set<int>[numTypes];
-    for (int obj = 0; obj < task.objects.size(); obj++) {
+    for (tSize obj = 0; obj < task.objects.size(); obj++) {
         auto oTypes = task.objects[obj].getTypes();
-        for (int i = 0; i < oTypes.size(); i++) {
+        for (tSize i = 0; i < oTypes.size(); i++) {
             int j = oTypes[i];
             types[j].insert(obj);
-			cout << "object " << obj << " " << j << " " << task.type_names[j] << endl;
         }
     }
-    unordered_set<int> parents[numTypes];
+    unordered_set<int> parents[numTypes]; // todo: equal sets
     for (int child = 0; child < numTypes; child++) {
         for (int parent = 0; parent < numTypes; parent++) {
             if (child == parent) continue;
@@ -74,39 +73,292 @@ liftedRP::liftedRP(const Task task) {
         }
     }
 
-    // create data structure for nullary precs/effects
-    for (int a = 0; a < task.actions.size(); a++) {
+    // create data structure for nullary precs/effects -> from bitmap to iterable set
+    for (tSize a = 0; a < task.actions.size(); a++) {
         setPosNullaryPrec.push_back(new unordered_set<int>);
         setNegNullaryPrec.push_back(new unordered_set<int>);
         setPosNullaryEff.push_back(new unordered_set<int>);
         setNegNullaryEff.push_back(new unordered_set<int>);
 
         auto posPrec = task.actions[a].get_positive_nullary_precond();
-        for (int f = 0; f < posPrec.size(); f++){
-            if (posPrec[f]){
+        for (tSize f = 0; f < posPrec.size(); f++) {
+            if (posPrec[f]) {
                 setPosNullaryPrec[a]->insert(f);
             }
         }
         auto negPrec = task.actions[a].get_negative_nullary_precond();
-        for (int f = 0; f < negPrec.size(); f++){
-            if (negPrec[f]){
+        for (tSize f = 0; f < negPrec.size(); f++) {
+            if (negPrec[f]) {
                 setNegNullaryPrec[a]->insert(f);
             }
         }
         auto posEff = task.actions[a].get_positive_nullary_effects();
-        for (int f = 0; f < posEff.size(); f++){
-            if (posEff[f]){
+        for (tSize f = 0; f < posEff.size(); f++) {
+            if (posEff[f]) {
                 setPosNullaryEff[a]->insert(f);
             }
         }
         auto negEff = task.actions[a].get_negative_nullary_effects();
-        for (int f = 0; f < negEff.size(); f++){
-            if (negEff[f]){
+        for (tSize f = 0; f < negEff.size(); f++) {
+            if (negEff[f]) {
                 setNegNullaryEff[a]->insert(f);
             }
         }
     }
 
+
+
+
+    cout << "- building achiever lookup table" << endl;
+    // !!! this code assumes the non-sparse (i.e. transitively closed) typing !!!
+    for (tSize iAction = 0; iAction < task.actions.size(); iAction++) {
+        auto consumer = task.actions[iAction];
+        achievers.push_back(new ActionPrecAchievers);
+        const auto precs = consumer.get_precondition();
+        for (tSize iPrec = 0; iPrec < precs.size(); iPrec++) {
+            achievers[iAction]->precAchievers.push_back(new ActionPrecAchiever);
+            const auto prec = precs[iPrec];
+            // check for this single prec which other actions can achieve it. need to check
+            // - predicate
+            // - typing of the specific parameters
+            for (tSize iPosAch = 0; iPosAch < task.actions.size(); iPosAch++) {
+                auto posAchAction = task.actions[iPosAch];
+                for (tSize ie = 0; ie < posAchAction.get_effects().size(); ie++) {
+                    auto eff = posAchAction.get_effects()[ie];
+                    if (eff.predicate_symbol == prec.predicate_symbol) {
+                        /* ** check typing **
+                         * what shall be excluded is that the predicate is defined on consumer
+                         * parent type, but the effect and the precondition are siblings
+                         *
+                         * example: In consumer transport domain, consumer locatable object may be consumer
+                         * transporter or consumer package. The "at" predicate may be defined
+                         * on "locatable"s. However, the "at" predicate of consumer package
+                         * cannot be fulfilled with consumer drive action.
+                         */
+                        bool typesCompatible = true;
+                        for (tSize iArg = 0; iArg < prec.arguments.size(); iArg++) {
+                            int varP = prec.arguments[iArg].index;
+                            int varE = eff.arguments[iArg].index;
+                            const bool pIsConst = prec.arguments[iArg].constant;
+                            const bool eIsConst = eff.arguments[iArg].constant;
+                            if (pIsConst && eIsConst) {
+                                if (varP == varE) {
+                                    continue;
+                                }
+                            } else if (pIsConst) {
+                                int typeE = posAchAction.get_parameters()[varE].type;
+                                if (types[typeE].find(varP) != types[typeE].end()) {
+                                    continue;
+                                }
+                            } else if (eIsConst) {
+                                int typeP = consumer.get_parameters()[varP].type;
+                                if (types[typeP].find(varE) != types[typeP].end()) {
+                                    continue;
+                                }
+                            } else {
+                                int typeP = consumer.get_parameters()[varP].type;
+                                int typeE = posAchAction.get_parameters()[varE].type;
+                                if (typeP == typeE) continue;
+                                if (parents[typeP].find(typeE) != parents[typeP].end()) continue;
+                                if (parents[typeE].find(typeP) != parents[typeE].end()) continue;
+                            }
+                            typesCompatible = false;
+                            break;
+                        }
+                        if (typesCompatible) {
+                            Achiever *ach = new Achiever;
+                            ach->action = iPosAch;
+                            ach->effect = ie;
+                            for (tSize ip = 0; ip < eff.arguments.size(); ip++) {
+                                auto args = eff.arguments[ip];
+                                if (!args.constant) {
+                                    ach->params.push_back(args.index);
+                                } else {
+                                    ach->params.push_back((args.index + 1) * -1);
+                                }
+                            }
+                            if (eff.negated == prec.negated) {
+                                achievers[iAction]->precAchievers[iPrec]->achievers.push_back(ach);
+                            } else {
+                                achievers[iAction]->precAchievers[iPrec]->destroyers.push_back(ach);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (int posPrec: *setPosNullaryPrec[iAction]) {
+            achievers[iAction]->posNullaryPrecAchievers[posPrec] = new ActionPrecAchiever;
+            for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+                auto possAchAction = task.actions[iPossibleAch];
+                if (possAchAction.get_positive_nullary_effects()[posPrec]) {
+                    Achiever *ach = new Achiever;
+                    ach->action = iPossibleAch;
+                    achievers[iAction]->posNullaryPrecAchievers[posPrec]->achievers.push_back(ach);
+                }
+            }
+        }
+        for (int negPrec: *setNegNullaryPrec[iAction]) {
+            achievers[iAction]->negNullaryPrecAchievers[negPrec] = new ActionPrecAchiever;
+            for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+                auto possAchAction = task.actions[iPossibleAch];
+                if (possAchAction.get_negative_nullary_effects()[negPrec]) {
+                    Achiever *ach = new Achiever;
+                    ach->action = iPossibleAch;
+                    achievers[iAction]->negNullaryPrecAchievers[negPrec]->achievers.push_back(ach);
+                }
+            }
+        }
+    }
+
+    // same for goals
+    goalAchievers = new ActionPrecAchievers;
+    for (tSize iGoal = 0; iGoal < task.goal.goal.size(); iGoal++) {
+        AtomicGoal goal = task.goal.goal[iGoal];
+        goalAchievers->precAchievers.push_back(new ActionPrecAchiever);
+        for (tSize iPosAch = 0; iPosAch < task.actions.size(); iPosAch++) {
+            auto posAchAction = task.actions[iPosAch];
+            for (tSize ie = 0; ie < posAchAction.get_effects().size(); ie++) {
+                auto eff = posAchAction.get_effects()[ie];
+                if (eff.predicate_symbol == goal.predicate) {
+                    bool typesCompatible = true;
+                    for (tSize iArg = 0; iArg < goal.args.size(); iArg++) {
+                        int goalObj = goal.args[iArg];
+                        int varE = eff.arguments[iArg].index;
+                        if (eff.arguments[iArg].constant) {
+                            if (varE != goalObj) {
+                                typesCompatible = false;
+                                break;
+                            }
+                        } else {
+                            int typeE = posAchAction.get_parameters()[varE].type;
+                            if (types[typeE].find(goalObj) == types[typeE].end()) {
+                                typesCompatible = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (typesCompatible) {
+                        Achiever *ach = new Achiever;
+                        ach->action = iPosAch;
+                        ach->effect = ie;
+                        for (tSize ip = 0; ip < eff.arguments.size(); ip++) {
+                            auto args = eff.arguments[ip];
+                            if (!args.constant) {
+                                ach->params.push_back(args.index);
+                            } else {
+                                ach->params.push_back((args.index + 1) * -1);
+                            }
+                        }
+                        if (eff.negated == goal.negated) {
+                            goalAchievers->precAchievers[iGoal]->achievers.push_back(ach);
+                        } else {
+                            goalAchievers->precAchievers[iGoal]->destroyers.push_back(ach);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (int posGoal: task.goal.positive_nullary_goals) {
+        goalAchievers->posNullaryPrecAchievers[posGoal] = new ActionPrecAchiever;
+        for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+            auto possAchAction = task.actions[iPossibleAch];
+            if (possAchAction.get_positive_nullary_effects()[posGoal]) {
+                Achiever *ach = new Achiever;
+                ach->action = iPossibleAch;
+                goalAchievers->posNullaryPrecAchievers[posGoal]->achievers.push_back(ach);
+            }
+        }
+    }
+    for (int negGoal: task.goal.negative_nullary_goals) {
+        goalAchievers->negNullaryPrecAchievers[negGoal] = new ActionPrecAchiever;
+        for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+            auto possAchAction = task.actions[iPossibleAch];
+            if (possAchAction.get_negative_nullary_effects()[negGoal]) {
+                Achiever *ach = new Achiever;
+                ach->action = iPossibleAch;
+                goalAchievers->negNullaryPrecAchievers[negGoal]->achievers.push_back(ach);
+            }
+        }
+    }
+
+    cout << "found achievers:" << endl;
+    for (tSize iAction = 0; iAction < task.actions.size(); iAction++) {
+        cout << "- action '" << task.actions[iAction].get_name() << "'";
+        auto precs = task.actions[iAction].get_precondition();
+        int numPrecs = precs.size() + setPosNullaryPrec[iAction]->size() + setNegNullaryPrec[iAction]->size();
+        cout << ", which has " << numPrecs << " preconditions" << endl;
+        for (tSize iPrec = 0; iPrec < precs.size(); iPrec++) {
+            cout << "  - prec: ";
+            if (precs[iPrec].negated) {
+                cout << "not ";
+            }
+            cout << "'" << task.predicates[precs[iPrec].predicate_symbol].getName() << "' achieved by";
+            auto achs = achievers[iAction]->precAchievers[iPrec]->achievers;
+            for (tSize iAchiever = 0; iAchiever < achs.size(); iAchiever++) {
+                auto achieverAction = task.actions[achs[iAchiever]->action];
+                cout << endl << "    - '" << achieverAction.get_name() << "'";
+                cout << " eff: " << achs[iAchiever]->effect;
+                cout << " pred: '"
+                     << task.predicates[achieverAction.get_effects()[achs[iAchiever]->effect].predicate_symbol].getName()
+                     << "'";
+            }
+            if (achs.empty()) { cout << " s0 only."; }
+            cout << endl;
+        }
+        for (int iPrec: *setPosNullaryPrec[iAction]) {
+            cout << "  - prec: nullary" << iPrec;
+            auto achs = achievers[iAction]->posNullaryPrecAchievers[iPrec]->achievers;
+            for (auto ach: achs) {
+                auto achieverAction = task.actions[ach->action];
+                cout << endl << "    - '" << achieverAction.get_name() << "'";
+            }
+        }
+        for (int iPrec: *setNegNullaryPrec[iAction]) {
+            cout << "  - prec: not nullary" << iPrec;
+            auto achs = achievers[iAction]->negNullaryPrecAchievers[iPrec]->achievers;
+            for (auto ach: achs) {
+                auto achieverAction = task.actions[ach->action];
+                cout << endl << "    - '" << achieverAction.get_name() << "'";
+            }
+        }
+    }
+
+    cout << "goal achievers:" << endl;
+    for (tSize iGoal = 0; iGoal < task.goal.goal.size(); iGoal++) {
+        cout << "- goal ";
+        if (task.goal.goal[iGoal].negated) {
+            cout << "not ";
+        }
+        cout << "'" << task.predicates[task.goal.goal[iGoal].predicate].getName() << "'";
+        for (tSize iAchiever = 0; iAchiever < goalAchievers->precAchievers[iGoal]->achievers.size(); iAchiever++) {
+            auto ach = goalAchievers->precAchievers[iGoal]->achievers[iAchiever];
+            auto achieverAction = task.actions[ach->action];
+            cout << endl << "    - '" << achieverAction.get_name() << "'";
+            cout << " eff: " << ach->effect;
+            cout << " pred: '" << task.predicates[achieverAction.get_effects()[ach->effect].predicate_symbol].getName()
+                 << "'";
+        }
+        if (goalAchievers->precAchievers[iGoal]->achievers.empty()) { cout << " s0 only."; }
+        cout << endl;
+    }
+    for (int g: task.goal.positive_nullary_goals) {
+        cout << "  - prec: nullary" << g;
+        auto achs = goalAchievers->posNullaryPrecAchievers[g]->achievers;
+        for (auto ach: achs) {
+            auto achieverAction = task.actions[ach->action];
+            cout << endl << "    - '" << achieverAction.get_name() << "'";
+        }
+    }
+    for (int g: task.goal.negative_nullary_goals) {
+        cout << "  - prec: not nullary" << g;
+        auto achs = goalAchievers->negNullaryPrecAchievers[g]->achievers;
+        for (auto ach: achs) {
+            auto achieverAction = task.actions[ach->action];
+            cout << endl << "    - '" << achieverAction.get_name() << "'";
+        }
+    }
 
     // make directional if there are multiple identical types
 	for (int i = 0; i < numTypes; i++) {
@@ -150,13 +402,12 @@ liftedRP::liftedRP(const Task task) {
     });
 
     children = new unordered_set<int>[numTypes];
-    ps = new unordered_set<int>[numTypes];
-    toptasks = new unordered_set<int>;
+    toptypes = new unordered_set<int>;
     for (int i = 0; i < numTypes; i++) {
         if (parents[i].size() == 0) {
-           toptasks->insert(i);
+            toptypes->insert(i);
         } else {
-            for (int p : parents[i]) {
+            for (int p: parents[i]) {
                 children[p].insert(i);
                 ps[i].insert(p);
             }
@@ -170,19 +421,19 @@ liftedRP::liftedRP(const Task task) {
     indexToObj = new int[numObjs];
 
     int r = 0;
-    for (int t : *toptasks) {
+    for (int t: *toptypes) {
         r = sortObjs(r, t);
     }
 
 	DEBUG(
-    for (int i = 0; i < task.objects.size(); i++) {
+    for (tSize i = 0; i < task.objects.size(); i++) {
         cout << task.objects[i].getName() << " ";
     }
     cout << endl;
 
     for (int i = 0; i < numTypes; i++) {
         cout << task.type_names[i] << ":\t" << lowerTindex[i] << "-" << upperTindex[i] << " = {";
-        for(int j = lowerTindex[i]; j <= upperTindex[i]; j++) {
+        for (int j = lowerTindex[i]; j <= upperTindex[i]; j++) {
             if (j > lowerTindex[i]) {
                 cout << ", ";
             }
@@ -193,269 +444,17 @@ liftedRP::liftedRP(const Task task) {
     }
 	);
 
-
-    cout << "- building achiever lookup table" << endl;
-    // !!! this code assumes the non-sparse (i.e. transitively closed) typing !!!
-    for (int iAction = 0; iAction < task.actions.size(); iAction++) {
-        auto a = task.actions[iAction];
-        achievers.push_back(new ActionPrecAchievers);
-        const auto precs = task.actions[iAction].get_precondition();
-        for (int iPrec = 0; iPrec < precs.size(); iPrec++) {
-            achievers[iAction]->precAchievers.push_back(new ActionPrecAchiever);
-            const auto prec = precs[iPrec];
-            // check for this single prec which other actions can achieve it. need to check
-            // - predicate
-            // - typing of the specific parameters
-            for (int iPosAch = 0; iPosAch < task.actions.size(); iPosAch++) {
-                auto posAchAction = task.actions[iPosAch];
-                for (int ie = 0; ie < posAchAction.get_effects().size(); ie++) {
-                    auto eff = posAchAction.get_effects()[ie];
-                    if ((eff.predicate_symbol == prec.predicate_symbol) && (eff.negated == prec.negated)){
-                        /* ** check typing **
-                         * what shall be excluded is that the predicate is defined on a
-                         * parent type, but the effect and the precondition are siblings
-                         *
-                         * example: In a transport domain, a locatable object may be a
-                         * transporter or a package. The "at" predicate may be defined
-                         * on "locatable"s. However, the "at" predicate of a package
-                         * cannot be fulfilled with a drive action.
-                         */
-                        bool typesCompatible = true;
-                        for (int iArg = 0; iArg < prec.arguments.size(); iArg++) {
-							if (!prec.arguments[iArg].constant && !eff.arguments[iArg].constant){
-                            	int varP = prec.arguments[iArg].index;
-								int typeP = a.get_parameters()[varP].type;
-                            	int varE = eff.arguments[iArg].index;
-                            	int typeE = posAchAction.get_parameters()[varE].type;
-                            	if (typeP == typeE) continue;
-                            	if (parents[typeP].find(typeE) != parents[typeP].end()) continue;
-                            	if (parents[typeE].find(typeP) != parents[typeE].end()) continue;
-                            	typesCompatible = false;
-                            	break;
-							} else if (prec.arguments[iArg].constant && !eff.arguments[iArg].constant){
-                            	int varE = eff.arguments[iArg].index;
-                            	int typeE = posAchAction.get_parameters()[varE].type;
-								
-								int constP = prec.arguments[iArg].index; 
-
-								if (types[typeE].find(constP) == types[typeE].end()){
-									typesCompatible = false;
-									break;
-								}
-							} else if (!prec.arguments[iArg].constant && eff.arguments[iArg].constant){
-                            	int varP = prec.arguments[iArg].index;
-								int typeP = a.get_parameters()[varP].type;
-                            	
-								int constE = eff.arguments[iArg].index;
-
-								if (types[typeP].find(constE) == types[typeP].end()){
-									typesCompatible = false;
-									break;
-								}
-							} else {
-								if (eff.arguments[iArg].index != prec.arguments[iArg].index){
-									typesCompatible = false;
-									break;
-								}
-							}
-                        }
-                        if (typesCompatible) {
-                            Achiever *ach = new Achiever;
-                            ach->action = iPosAch;
-                            ach->effect = ie;
-                            for (int ip = 0; ip < eff.arguments.size(); ip++) {
-                                auto args = eff.arguments[ip];
-                                //assert(!args.constant);
-                                if (args.constant){
-									ach->params.push_back(-args.index-1);
-								} else {
-									ach->params.push_back(args.index);
-								}
-                            }
-                            achievers[iAction]->precAchievers[iPrec]->achievers.push_back(ach);
-                        }
-                    }
-                }
-            }
-        }
-        for (int posPrec : *setPosNullaryPrec[iAction]) {
-            achievers[iAction]->posNullaryPrecAchievers[posPrec] = new ActionPrecAchiever;
-            for (int iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
-                auto possAchAction = task.actions[iPossibleAch];
-                if (possAchAction.get_positive_nullary_effects()[posPrec]) {
-                    Achiever *ach = new Achiever;
-                    ach->action = iPossibleAch;
-                    achievers[iAction]->posNullaryPrecAchievers[posPrec]->achievers.push_back(ach);
-                }
-            }
-        }
-        for (int negPrec : *setNegNullaryPrec[iAction]) {
-            achievers[iAction]->negNullaryPrecAchievers[negPrec] = new ActionPrecAchiever;
-            for (int iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
-                auto possAchAction = task.actions[iPossibleAch];
-                if (possAchAction.get_negative_nullary_effects()[negPrec]) {
-                    Achiever *ach = new Achiever;
-                    ach->action = iPossibleAch;
-                    achievers[iAction]->negNullaryPrecAchievers[negPrec]->achievers.push_back(ach);
-                }
-            }
-        }
-    }
-
-    // same for goals
-    goalAchievers = new ActionPrecAchievers;
-    for (int iGoal = 0; iGoal < task.goal.goal.size(); iGoal++) {
-        AtomicGoal goal = task.goal.goal[iGoal];
-        goalAchievers->precAchievers.push_back(new ActionPrecAchiever);
-        for (int iPosAch = 0; iPosAch < task.actions.size(); iPosAch++) {
-            auto posAchAction = task.actions[iPosAch];
-            for (int ie = 0; ie < posAchAction.get_effects().size(); ie++) {
-                auto eff = posAchAction.get_effects()[ie];
-                if ((eff.predicate_symbol == goal.predicate) && (eff.negated == goal.negated)) {
-                    bool typesCompatible = true;
-                    for (int iArg = 0; iArg < goal.args.size(); iArg++) {
-                        int goalObj = goal.args[iArg];
-                        
-						if (!eff.arguments[iArg].constant){
-							int varE = eff.arguments[iArg].index;
-                        	int typeE = posAchAction.get_parameters()[varE].type;
-                        	if (types[typeE].find(goalObj) == types[typeE].end()) {
-                        	    typesCompatible = false;
-                        	    break;
-                        	}
-						} else {
-							if (goalObj != eff.arguments[iArg].index){
-                        	    typesCompatible = false;
-                        	    break;
-							}
-						}
-                    }
-                    if (typesCompatible) {
-                        Achiever *ach = new Achiever;
-                        ach->action = iPosAch;
-                        ach->effect = ie;
-                        for (int ip = 0; ip < eff.arguments.size(); ip++) {
-                            auto args = eff.arguments[ip];
-							if (args.constant)
-                            	ach->params.push_back(-args.index-1);
-							else
-								ach->params.push_back(args.index);
-                        }
-                        goalAchievers->precAchievers[iGoal]->achievers.push_back(ach);
-                    }
-                }
-            }
-        }
-    }
-    for (int posGoal : task.goal.positive_nullary_goals) {
-        goalAchievers->posNullaryPrecAchievers[posGoal] = new ActionPrecAchiever;
-        for (int iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
-            auto possAchAction = task.actions[iPossibleAch];
-            if (possAchAction.get_positive_nullary_effects()[posGoal]) {
-                Achiever *ach = new Achiever;
-                ach->action = iPossibleAch;
-                goalAchievers->posNullaryPrecAchievers[posGoal]->achievers.push_back(ach);
-            }
-        }
-    }
-    for (int negGoal : task.goal.negative_nullary_goals) {
-        goalAchievers->negNullaryPrecAchievers[negGoal] = new ActionPrecAchiever;
-        for (int iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
-            auto possAchAction = task.actions[iPossibleAch];
-            if (possAchAction.get_negative_nullary_effects()[negGoal]) {
-                Achiever *ach = new Achiever;
-                ach->action = iPossibleAch;
-                goalAchievers->negNullaryPrecAchievers[negGoal]->achievers.push_back(ach);
-            }
-        }
-    }
-
-    cout << "found achievers:" << endl;
-    for (int iAction = 0; iAction < task.actions.size(); iAction++) {
-        cout << "- action #" << iAction << " '" << task.actions[iAction].get_name() << "'";
-        auto precs = task.actions[iAction].get_precondition();
-        int numPrecs = precs.size() + setPosNullaryPrec[iAction]->size() + setNegNullaryPrec[iAction]->size();
-        cout << ", which has " << numPrecs << " preconditions" << endl;
-        for (int iPrec = 0; iPrec < precs.size(); iPrec++) {
-            cout << "  - prec: ";
-            if (precs[iPrec].negated) {
-                cout << "not ";
-            }
-            cout << "'" << task.predicates[precs[iPrec].predicate_symbol].getName() << "' achieved by";
-            auto achs = achievers[iAction]->precAchievers[iPrec]->achievers;
-            for (int iAchiever = 0; iAchiever < achs.size(); iAchiever++) {
-                auto achieverAction = task.actions[achs[iAchiever]->action];
-                cout << endl << "    - '" << achieverAction.get_name() << "'";
-                cout << " eff: " << achs[iAchiever]->effect;
-                cout << " pred: '" << task.predicates[achieverAction.get_effects()[achs[iAchiever]->effect].predicate_symbol].getName() << "'";
-            }
-            if (achs.empty()) {cout << " s0 only.";}
-            cout << endl;
-        }
-        for (int iPrec : *setPosNullaryPrec[iAction]) {
-            cout << "  - prec: nullary" << iPrec;
-            auto achs = achievers[iAction]->posNullaryPrecAchievers[iPrec]->achievers;
-            for (auto ach : achs) {
-                auto achieverAction = task.actions[ach->action];
-                cout << endl << "    - '" << achieverAction.get_name() << "'";
-            }
-        }
-        for (int iPrec : *setNegNullaryPrec[iAction]) {
-            cout << "  - prec: not nullary" << iPrec;
-            auto achs = achievers[iAction]->negNullaryPrecAchievers[iPrec]->achievers;
-            for (auto ach : achs) {
-                auto achieverAction = task.actions[ach->action];
-                cout << endl << "    - '" << achieverAction.get_name() << "'";
-            }
-        }
-    }
-
-    cout << "goal achievers:" << endl;
-    for (int iGoal = 0; iGoal < task.goal.goal.size(); iGoal++) {
-        cout << "- goal ";
-        if (task.goal.goal[iGoal].negated) {
-            cout << "not ";
-        }
-        cout << "'" << task.predicates[task.goal.goal[iGoal].predicate].getName() << "'";
-        for (int iAchiever = 0; iAchiever < goalAchievers->precAchievers[iGoal]->achievers.size(); iAchiever++) {
-            auto ach = goalAchievers->precAchievers[iGoal]->achievers[iAchiever];
-            auto achieverAction = task.actions[ach->action];
-            cout << endl << "    - '" << achieverAction.get_name() << "'";
-            cout << " eff: " << ach->effect;
-            cout << " pred: '" << task.predicates[achieverAction.get_effects()[ach->effect].predicate_symbol].getName()
-                 << "'";
-        }
-        if (goalAchievers->precAchievers[iGoal]->achievers.empty()) { cout << " s0 only."; }
-        cout << endl;
-    }
-    for (int g : task.goal.positive_nullary_goals) {
-        cout << "  - prec: nullary" << g;
-        auto achs = goalAchievers->posNullaryPrecAchievers[g]->achievers;
-        for (auto ach : achs) {
-            auto achieverAction = task.actions[ach->action];
-            cout << endl << "    - '" << achieverAction.get_name() << "'";
-        }
-    }
-    for (int g : task.goal.negative_nullary_goals) {
-        cout << "  - prec: not nullary" << g;
-        auto achs = goalAchievers->negNullaryPrecAchievers[g]->achievers;
-        for (auto ach : achs) {
-            auto achieverAction = task.actions[ach->action];
-            cout << endl << "    - '" << achieverAction.get_name() << "'";
-        }
-    }
-
-	cout << "- num actions " << numActions << endl;
+    cout << "- num actions " << numActions << endl;
     cout << "- num objects " << numObjs << endl;
     cout << "- max arity " << maxArity << endl;
 
-    for (int i = 0; i < task.predicates.size(); i++) {
+    for (tSize i = 0; i < task.predicates.size(); i++) {
         cout << i << " " << task.predicates[i].getName() << endl;
     }
 
 	DEBUG(
     cout << endl << "Initial state (static):" << endl;
-    for (int i = 0; i < task.get_static_info().get_relations().size(); i++) {
+    for (tSize i = 0; i < task.get_static_info().get_relations().size(); i++) {
         auto rel = task.get_static_info().get_relations()[i];
         auto tuple = task.get_static_info().get_tuples_of_relation(i);
         for (vector<int> groundA: tuple) {
@@ -463,12 +462,12 @@ liftedRP::liftedRP(const Task task) {
             for (int obj: groundA) {
                 cout << " " << task.objects[obj].getName();
             }
-            cout <<")" << endl;
+            cout << ")" << endl;
         }
     }
 
     cout << endl << "Initial state (non-static):" << endl;
-    for (int i = 0; i < task.initial_state.get_relations().size(); i++) {
+    for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
         auto rel = task.initial_state.get_relations()[i];
         auto tuple = task.initial_state.get_tuples_of_relation(i);
         for (vector<int> groundA: tuple) {
@@ -476,7 +475,7 @@ liftedRP::liftedRP(const Task task) {
             for (int obj: groundA) {
                 cout << " " << task.objects[obj].getName();
             }
-            cout <<")" << endl;
+            cout << ")" << endl;
         }
     }
 	);
