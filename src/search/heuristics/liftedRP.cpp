@@ -538,7 +538,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		parameterVars.push_back(parameterVarsTime);
 
 
-		continue;
 		std::vector<std::vector<int>> precSupporter;
 		// precondition support selection
 		for (int p = 0; p < maxPrec; p++){
@@ -590,7 +589,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						"action@" + to_string(time) + 
 						"-" + task.actions[action].get_name()));
 
-			continue;
 			// typing implications!
             auto params = task.actions[action].get_parameters();
             for (int l = 0; l < params.size(); l++) {
@@ -631,7 +629,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			// this means that every precondition is supported by a prior action or the initial state
 	        const auto precs = task.actions[action].get_precondition();
 	        for (int prec = 0; prec < precs.size(); prec++) {
-				continue;
             	
 				const auto & precObjec = precs[prec];
 				int predicate = precObjec.predicate_symbol;
@@ -820,7 +817,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 	// the goal must be achieved!
 	for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
-		continue;
 		const AtomicGoal & goalAtom = task.goal.goal[goal];
 		if (goalAtom.negated) continue; // TODO don't know what to do ...
 		if (!atom_not_satisfied(s,goalAtom)) continue; // goal is satisfied so we don't have to achieve it via actions
@@ -878,8 +874,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	
 
 	DEBUG(cout << "Solver State: " << state << endl);
-	if (state == 100){
-	//if (planLength == 8){
+	if (state == 10){
 #if NDEBUG
 		std::clock_t end = std::clock();
 		double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
