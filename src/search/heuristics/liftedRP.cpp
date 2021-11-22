@@ -976,7 +976,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	
 		std::vector<int> goalSupporter;
 		for (int pTime = planLength-1; pTime < planLength; pTime++){
-			int goalSuppVar = goalSupporterVars[goal][pTime];
+			int goalSuppVar = goalSupporterVars[goal][pTime+1];
 
 			vector<int> achieverSelection;
 			for (size_t j = 0; j < thisGoalAchievers->achievers.size(); j++){
@@ -1003,7 +1003,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	
 		// don't use later support ... These assumptions are cleared after each call
 		
-		for (size_t time = planLength; time < goalSupporterVars[goal].size(); time++)
+		for (size_t time = planLength + 1; time < goalSupporterVars[goal].size(); time++)
 			ipasir_assume(solver,-goalSupporterVars[goal][time]);
 	}
 
@@ -1011,17 +1011,17 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
 		const AtomicGoal & goalAtom = task.goal.goal[goal];
 		if (goalAtom.negated) continue; // TODO don't know what to do ...
-		if (!atom_not_satisfied(s,goalAtom)) {
-			cout << "GOAL already satisfied in init ... we have not implemeted this ... " << endl;
-			exit(0);	
-		}
+		//if (!atom_not_satisfied(s,goalAtom)) {
+		//	cout << "GOAL already satisfied in init ... we have not implemeted this ... " << endl;
+		//	//exit(0);	
+		//}
 
 		ActionPrecAchiever* thisGoalDestroyers = goalAchievers->precAchievers[goal];
 	
 	
 		std::vector<int> goalSupporter;
 		// from the beginning ... 
-		for (int pTime = 0; pTime < planLength; pTime++){
+		for (int pTime = 0; pTime <= planLength; pTime++){
 			int goalSuppVar = goalSupporterVars[goal][pTime];
 
 			for (size_t j = 0; j < thisGoalDestroyers->destroyers.size(); j++){
@@ -1126,7 +1126,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 		actionVars.clear();
 
 		// the goal must be achieved!
-		int gc= 0;
+		int gc = 0;
 		for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
 			const AtomicGoal & goalAtom = task.goal.goal[goal];
 			std::vector<int> goalSupporter;
@@ -1135,21 +1135,19 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 				goalSupporterVars.push_back(goalSupporter);
 				continue; // TODO don't know what to do ...
 			}
-			if (!atom_not_satisfied(s,goalAtom)) {
-				goalSupporterVars.push_back(goalSupporter);
-				continue; // goal is satisfied so we don't have to achieve it via actions
-			}
 			gc++;
 	
 			//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
 		
-			for (int pTime = 0; pTime < maxPlanLength; pTime++){
+			for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
 				int goalSuppVar = capsule.new_variable();
 				goalSupporter.push_back(goalSuppVar);
 				DEBUG(capsule.registerVariable(goalSuppVar,
-							"goalSupp#" + to_string(goal) + "-" + to_string(pTime)));
+							"goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
 	
 			}
+			if (atom_not_satisfied(s,goalAtom)) assertNot(solver,goalSupporter[0]);	
+			
 			atLeastOne(solver,capsule,goalSupporter);
 			goalSupporterVars.push_back(goalSupporter);
 		}
