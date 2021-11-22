@@ -32,9 +32,9 @@ liftedRP::liftedRP(const Task task) {
 			if (maxNum[p.first] < p.second)
 				maxNum[p.first] = p.second;
     }
-    for (int obj = 0; obj < task.objects.size(); obj++) {
+    for (size_t obj = 0; obj < task.objects.size(); obj++) {
         auto oTypes = task.objects[obj].getTypes();
-        for (int i = 0; i < oTypes.size(); i++)
+        for (size_t i = 0; i < oTypes.size(); i++)
 			objCount[oTypes[i]] += 1;
 	}
 
@@ -98,12 +98,14 @@ liftedRP::liftedRP(const Task task) {
         for (tSize f = 0; f < posEff.size(); f++) {
             if (posEff[f]) {
                 setPosNullaryEff[a]->insert(f);
+				nullaryAchiever[f].push_back(a);
             }
         }
         auto negEff = task.actions[a].get_negative_nullary_effects();
         for (tSize f = 0; f < negEff.size(); f++) {
             if (negEff[f]) {
                 setNegNullaryEff[a]->insert(f);
+				nullaryDestroyer[f].push_back(a);
             }
         }
     }
@@ -517,12 +519,24 @@ bool liftedRP::atom_not_satisfied(const DBState &s,
 vector<vector<int>> goalSupporterVars;
 std::vector<std::vector<std::vector<int>>> parameterVars;
 std::vector<std::vector<int>> actionVars;
+std::unordered_map<int,int> lastNullary;
 double solverTotal;
 
 bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule) {
 	// indices: timestep -> parameter -> object
 	for (int time = planLength-1; time < planLength; time++){
 		DEBUG(cout << "Generating time = " << time << endl);
+
+		// generate nullary variables
+		std::unordered_map<int,int> currentNullary;
+		for (int n : task.nullary_predicates){
+			int nullVar = capsule.new_variable();
+			currentNullary[n] = nullVar;
+			DEBUG(capsule.registerVariable(nullVar,
+						"nullary#" + to_string(n) + "_" + to_string(time)));
+		}
+
+
 		//cout << "O " << task.objects.size() << " A " << maxArity << endl;
 		std::vector<std::vector<int>> parameterVarsTime(maxArity);
     	for (int paramter = 0; paramter < maxArity; paramter++){
@@ -594,7 +608,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 			// typing implications!
             auto params = task.actions[action].get_parameters();
-            for (int l = 0; l < params.size(); l++) {
+            for (size_t l = 0; l < params.size(); l++) {
                 DEBUG(cout << "\t\t" << task.type_names[params[l].type] << ": ");
                 int lower = lowerTindex[params[l].type];
                 int upper = upperTindex[params[l].type];
@@ -628,10 +642,22 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			}
 
 
+			// nullary preconditions
+			for (int p : *setPosNullaryPrec[action])
+				implies(solver,actionVar,lastNullary[p]);
+			for (int p : *setNegNullaryPrec[action])
+				impliesNot(solver,actionVar,lastNullary[p]);
+
+			for (int p : *setPosNullaryEff[action])
+				implies(solver,actionVar,currentNullary[p]);
+			for (int p : *setNegNullaryEff[action])
+				impliesNot(solver,actionVar,currentNullary[p]);
+
+
 			// if this action is chosen, it has to be executable
 			// this means that every precondition is supported by a prior action or the initial state
 	        const auto precs = task.actions[action].get_precondition();
-	        for (int prec = 0; prec < precs.size(); prec++) {
+	        for (size_t prec = 0; prec < precs.size(); prec++) {
             	
 				const auto & precObjec = precs[prec];
 				int predicate = precObjec.predicate_symbol;
@@ -677,7 +703,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				vector<pair<vector<int>,bool>> supportingTuples;
 
 				// TODO: sind die nicht nach den predikaten sortiert????
-    			for (int i = 0; i < task.get_static_info().get_relations().size(); i++) {
+    			for (size_t i = 0; i < task.get_static_info().get_relations().size(); i++) {
     			    auto rel = task.get_static_info().get_relations()[i];
     			    auto tuple = task.get_static_info().get_tuples_of_relation(i);
 
@@ -736,7 +762,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 						// if init fact is not static, it may not be destroyed on the way ...
 						if (!supportingTuples[i].second){
-							for (size_t prevTime = 0; prevTime < planLength-1; prevTime++){
+							for (int prevTime = 0; prevTime < planLength-1; prevTime++){
 								for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
 									Achiever* deleter = myAchievers->destroyers[del];
 
@@ -772,7 +798,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				}
 
 				// 3. Step: Supporter of type 2: other actions
-				for (int i = 1; i < precSupporter[prec].size(); i++){
+				for (size_t i = 1; i < precSupporter[prec].size(); i++){
 
 					if (myAchievers->achievers.size() == 0){
 						DEBUG(cout << "\t\tnon-achievable precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
@@ -889,10 +915,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 										criticalVars.push_back(actionVar);
 										criticalVars.push_back(precSupporter[prec][i]);
 									}
-									cout << "CRIT";
-									for (int x : criticalVars)
-										cout << " " << x << " " << capsule.variableNames[x];
-									cout << endl;
+									//cout << "CRIT";
+									//for (int x : criticalVars)
+									//	cout << " " << x << " " << capsule.variableNames[x];
+									//cout << endl;
 
 									set<int> temp(criticalVars.begin(), criticalVars.end());
 									notAll(solver,temp);
@@ -905,10 +931,39 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			
 			}
 		}
+
+		// frame axioms for nullary predicates
+		for (int n : task.nullary_predicates){
+			vector<int> adder;
+			for (int a : nullaryAchiever[n])
+			   adder.push_back(actionVarsTime[a]);
+			impliesPosAndNegImpliesOr(solver,currentNullary[n], lastNullary[n], adder);
+
+			vector<int> deleter;
+			for (int d : nullaryDestroyer[n])
+			   deleter.push_back(actionVarsTime[d]);
+			impliesPosAndNegImpliesOr(solver,lastNullary[n], currentNullary[n], deleter);
+		}
+
+
 		actionVars.push_back(actionVarsTime);
 		atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
 		atMostOne(solver,capsule,actionVarsTime);
+	
+		
+		lastNullary = currentNullary;
 	}
+
+	int nullaryGoalBlocker = capsule.new_variable();
+	DEBUG(capsule.registerVariable(nullaryGoalBlocker,"nullaryGoalBlocker#" + to_string(planLength)));
+	ipasir_assume(solver,nullaryGoalBlocker);
+
+	
+    for (int g : task.goal.positive_nullary_goals)
+		implies(solver,nullaryGoalBlocker,lastNullary[g]);	
+    for (int g : task.goal.negative_nullary_goals)
+		impliesNot(solver,nullaryGoalBlocker,lastNullary[g]);	
+
 
 	// the goal must be achieved!
 	for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
@@ -975,7 +1030,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
 		//return true;
 #endif
-		printVariableTruth(solver,capsule);
+		DEBUG(printVariableTruth(solver,capsule));
 	}
 	else return false;
 
@@ -1047,7 +1102,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 			}
 			gc++;
 	
-			ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
+			//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
 		
 			for (int pTime = 0; pTime < maxPlanLength; pTime++){
 				int goalSuppVar = capsule.new_variable();
@@ -1062,6 +1117,19 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 
 		// we only test executable plans and if the goal is a dead end ...
 		if (!gc) return 0;
+
+		
+		for (int n : task.nullary_predicates){
+			int nullaryInInit = capsule.new_variable();
+			lastNullary[n] = nullaryInInit;
+			DEBUG(capsule.registerVariable(nullaryInInit,
+						"nullary#" + to_string(n) + "_" + to_string(-1)));
+
+			if (s.get_nullary_atoms()[n])
+				assertYes(solver,nullaryInInit);
+			else
+				assertNot(solver,nullaryInInit);
+		}
 
 
 		// start the incremental search for a plan	
@@ -1130,7 +1198,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
             //cout << task.actions[j - 1].get_name() << endl;
             IloConstraint schemaEq = (v[iSchema] == j);
             auto params = task.actions[j - 1].get_parameters();
-            for (int l = 0; l < params.size(); l++) {
+            for (size_t l = 0; l < params.size(); l++) {
                 //cout << "- " << task.type_names[params[l].type] << ": ";
                 int lower = lowerTindex[params[l].type];
                 int upper = upperTindex[params[l].type];
