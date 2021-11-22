@@ -969,7 +969,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
 		const AtomicGoal & goalAtom = task.goal.goal[goal];
 		if (goalAtom.negated) continue; // TODO don't know what to do ...
-		if (!atom_not_satisfied(s,goalAtom)) continue; // goal is satisfied so we don't have to achieve it via actions
+		//if (!atom_not_satisfied(s,goalAtom)) continue; // goal is satisfied so we don't have to achieve it via actions
 
 		ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
 	
@@ -1005,6 +1005,46 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		
 		for (size_t time = planLength; time < goalSupporterVars[goal].size(); time++)
 			ipasir_assume(solver,-goalSupporterVars[goal][time]);
+	}
+
+	// this timestep might disable goal achievers ...
+	for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
+		const AtomicGoal & goalAtom = task.goal.goal[goal];
+		if (goalAtom.negated) continue; // TODO don't know what to do ...
+		if (!atom_not_satisfied(s,goalAtom)) {
+			cout << "GOAL already satisfied in init ... we have not implemeted this ... " << endl;
+			exit(0);	
+		}
+
+		ActionPrecAchiever* thisGoalDestroyers = goalAchievers->precAchievers[goal];
+	
+	
+		std::vector<int> goalSupporter;
+		// from the beginning ... 
+		for (int pTime = 0; pTime < planLength; pTime++){
+			int goalSuppVar = goalSupporterVars[goal][pTime];
+
+			vector<int> achieverSelection;
+			for (size_t j = 0; j < thisGoalDestroyers->achievers.size(); j++){
+				Achiever* destroyer = thisGoalDestroyers->destroyers[j];
+				
+				vector<int> criticalVars;
+				criticalVars.push_back(actionVars[planLength-1][destroyer->action]);
+
+				for (size_t k = 0; k < destroyer->params.size(); k++){
+					int myConst = goalAtom.args[k]; // my object (main index)
+					int theirParam = destroyer->params[k];
+
+					if (theirParam >= 0){
+						criticalVars.push_back(parameterVars[planLength-1][theirParam][objToIndex[myConst]]);
+					} // else it is a constant and has already been checked
+				}
+
+				criticalVars.push_back(goalSuppVar);
+				set<int> temp(criticalVars.begin(), criticalVars.end());
+				notAll(solver,temp);
+			}
+		}
 	}
 		
 
