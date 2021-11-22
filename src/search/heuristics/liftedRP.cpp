@@ -1024,8 +1024,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		for (int pTime = 0; pTime < planLength; pTime++){
 			int goalSuppVar = goalSupporterVars[goal][pTime];
 
-			vector<int> achieverSelection;
-			for (size_t j = 0; j < thisGoalDestroyers->achievers.size(); j++){
+			for (size_t j = 0; j < thisGoalDestroyers->destroyers.size(); j++){
 				Achiever* destroyer = thisGoalDestroyers->destroyers[j];
 				
 				vector<int> criticalVars;
