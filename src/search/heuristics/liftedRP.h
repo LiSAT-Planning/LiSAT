@@ -25,6 +25,7 @@ struct Achiever {
 struct ActionPrecAchiever {
     // it stores for a **single action precondition** which other action can achieve it
 	std::vector<Achiever*> achievers;
+	std::vector<Achiever*> destroyers;
     // todo: add which s0 literals can fulfill this precondition
 };
 
@@ -49,6 +50,8 @@ private:
     int* upperTindex;
     int* objToIndex;
     int* indexToObj;
+
+	std::unordered_set<int>*	toptypes;
 
 	std::unordered_set<int>* types;
 
@@ -79,5 +82,7 @@ public:
     int paramID(int i, int j);
 };
 
+
+typedef size_t tSize;
 
 #endif //SEARCH_LIFTEDRP_H

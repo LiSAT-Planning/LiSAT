@@ -409,7 +409,7 @@ liftedRP::liftedRP(const Task task) {
         } else {
             for (int p: parents[i]) {
                 children[p].insert(i);
-                ps[i].insert(p);
+                //ps[i].insert(p);
             }
         }
     }
@@ -689,7 +689,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					}
     			}
 
-    			for (int i = 0; i < s.get_relations().size(); i++) {
+    			for (tSize i = 0; i < s.get_relations().size(); i++) {
     			    auto rel = s.get_relations()[i];
     			    auto tuple = s.get_tuples_of_relation(i);
 					
@@ -857,13 +857,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	
 		// don't use later support ... These assumptions are cleared after each call
 		
-		//if (planLength != 3) continue;
 		for (size_t time = planLength; time < goalSupporterVars[goal].size(); time++)
 			ipasir_assume(solver,-goalSupporterVars[goal][time]);
 	}
 		
-	//if (planLength != 3) return false;
-
 
 	DEBUG(capsule.printVariables());
 
@@ -881,8 +878,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	
 
 	DEBUG(cout << "Solver State: " << state << endl);
-	//if (state == 100){
-	if (planLength == 8){
+	if (state == 100){
+	//if (planLength == 8){
 #if NDEBUG
 		std::clock_t end = std::clock();
 		double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
