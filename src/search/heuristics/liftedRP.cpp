@@ -1173,12 +1173,12 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 		// start the incremental search for a plan	
 		planLength = 0;
 		for (int i = 0; i < 10; i++){
-			while (planLength < (1 << i)){
+			while (planLength < (1 << i)-1){
 				planLength++;
 				compute_heuristic_sat(s,task,start,solver,capsule,true,false);
 			}
 			
-
+			planLength++;
 			if (compute_heuristic_sat(s,task,start,solver,capsule,false,false)){
 				ipasir_release(solver);
 				cout << "\t\tPlan of length: " << planLength << endl;
