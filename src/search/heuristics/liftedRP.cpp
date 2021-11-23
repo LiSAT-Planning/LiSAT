@@ -532,8 +532,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		for (int n : task.nullary_predicates){
 			int nullVar = capsule.new_variable();
 			currentNullary[n] = nullVar;
-			DEBUG(capsule.registerVariable(nullVar,
-						"nullary#" + to_string(n) + "_" + to_string(time)));
+			DEBUG(capsule.registerVariable(nullVar,	"nullary#" + to_string(n) + "_" + to_string(time)));
 		}
 
 
@@ -545,16 +544,14 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			for (size_t o = 0; o < task.objects.size(); o++){
 				int objectVar = capsule.new_variable();
 				parameterVarsTime[paramter][o] = objectVar;
-				DEBUG(capsule.registerVariable(objectVar,
-							"const@" + to_string(time) + "#" + to_string(paramter) + 
-							"-" + task.objects[indexToObj[o]].getName()));
+				DEBUG(capsule.registerVariable(objectVar, "const@" + to_string(time) + "#" + to_string(paramter) + "-" + task.objects[indexToObj[o]].getName()));
 			}
 			// each parameter can have at most one value
 			atMostOne(solver,capsule,parameterVarsTime[paramter]);
 		}
 		parameterVars.push_back(parameterVarsTime);
 
-
+		/// General supporter selection (no specific precondition is considered here)
 		std::vector<std::vector<int>> precSupporter;
 		// precondition support selection
 		for (int p = 0; p < maxPrec; p++){
@@ -562,14 +559,32 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			for (int pTime = -1; pTime < time; pTime++){
 				int preSuppVar = capsule.new_variable();
 				precSupporterPrec.push_back(preSuppVar);
-				DEBUG(capsule.registerVariable(preSuppVar,
-							"preSupp@" + to_string(time) + "#" + to_string(p) + 
-							"-" + to_string(pTime)));
+				DEBUG(capsule.registerVariable(preSuppVar, "preSupp@" + to_string(time) + "#" + to_string(p) + "-" + to_string(pTime)));
 			}
 
 			precSupporter.push_back(precSupporterPrec);
 		}
-		
+
+		/// variables stating over which variables a support spans
+		// precSupporterOver[p][ptime] is true if there is support for precondition p spanning *over* time ptime
+		std::vector<std::vector<int>> precSupporterOver;
+		for (int p = 0; p < maxPrec; p++){
+			std::vector<int> supportOver;
+			for (int pTime = 0; pTime < time; pTime++){
+				int overVar = capsule.new_variable();
+				implies(solver,precSupporter[p][pTime], overVar);
+				if (pTime > 0)
+					implies(solver,supportOver.back(),overVar);
+				
+				supportOver.push_back(overVar);
+				DEBUG(capsule.registerVariable(overVar, "supportOver@" + to_string(time) + "#" + to_string(p) + "-" + to_string(pTime)));
+			}
+
+			precSupporterOver.push_back(supportOver);
+		}
+
+
+		/// Variables tracking equality of task parameters	
 		std::vector<std::vector<std::vector<int>>> parameterEquality;
     	for (int paramterThis = 0; paramterThis < maxArity; paramterThis++){
     		vector<vector<int>> equalVarsP;
@@ -578,9 +593,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				for (int paramterBefore = 0; paramterBefore < maxArity; paramterBefore++){
 					int equalsVar = capsule.new_variable();
 					equalVarsB.push_back(equalsVar);
-					DEBUG(capsule.registerVariable(equalsVar,
-								"equal@" + to_string(time) + "#" + to_string(paramterThis) + 
-								"@" + to_string(pTime) + "#" + to_string(paramterBefore)));
+					DEBUG(capsule.registerVariable(equalsVar, "equal@" + to_string(time) + "#" + to_string(paramterThis) + "@" + to_string(pTime) + "#" + to_string(paramterBefore)));
 					
 					for(size_t o = 0; o < task.objects.size(); o++){
 						andImplies(solver,equalsVar, parameterVars[time][paramterThis][o], parameterVars[pTime][paramterBefore][o]);
@@ -593,18 +606,14 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			parameterEquality.push_back(equalVarsP);
 		}
 
-
-
-		// action variables
+		/// action variables
 		std::vector<int> actionVarsTime;	
 		for (size_t action = 0; action < task.actions.size(); action++){
             DEBUG(cout << "\t" << task.actions[action].get_name() << endl);
 
 			int actionVar = capsule.new_variable();
 			actionVarsTime.push_back(actionVar);
-			DEBUG(capsule.registerVariable(actionVar,
-						"action@" + to_string(time) + 
-						"-" + task.actions[action].get_name()));
+			DEBUG(capsule.registerVariable(actionVar,"action@" + to_string(time) + "-" + task.actions[action].get_name()));
 
 			// typing implications!
             auto params = task.actions[action].get_parameters();
@@ -678,7 +687,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							}
 						}
 					} else {
-						// equals	
+						// equals
 						if (precObjec.arguments[0].constant){
 							int myObjIndex = objToIndex[precObjec.arguments[0].index];
 							implies(solver,actionVar, parameterVars[time][1][myObjIndex]);
@@ -696,6 +705,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				}
 
 				// 1. Step: select the time step which supports
+				// precSupporter is a generic variable that just tells you from which timestep we take the support
 				impliesOr(solver,actionVar,precSupporter[prec]);
 			
 				// 2. Step: Supporter of type 1: initial state
@@ -738,9 +748,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					for (size_t i = 0; i < supportingTuples.size(); i++){
 						int suppVar = capsule.new_variable();
 						suppOptions.push_back(suppVar);
-						DEBUG(capsule.registerVariable(suppVar,
-									"initAchiever@" + to_string(time) + "#" + to_string(action) + 
-									"-" + to_string(-1) + "_" + to_string(i)));
+						DEBUG(capsule.registerVariable(suppVar, "initAchiever@" + to_string(time) + "#" + to_string(action) + "-" + to_string(-1) + "_" + to_string(i)));
 					}
 					// one supporter must be chosen
 					impliesOr(solver,actionVar,precSupporter[prec][0],suppOptions);
@@ -759,40 +767,40 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							}
 						}
 
-						// if init fact is not static, it may not be destroyed on the way ...
-						if (!supportingTuples[i].second){
-							for (int prevTime = 0; prevTime < planLength-1; prevTime++){
-								for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
-									Achiever* deleter = myAchievers->destroyers[del];
+						//// if init fact is not static, it may not be destroyed on the way ...
+						//if (!supportingTuples[i].second){
+						//	for (int prevTime = 0; prevTime < planLength-1; prevTime++){
+						//		for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
+						//			Achiever* deleter = myAchievers->destroyers[del];
 
-									set<int> criticalVars;
-									bool noNeed = false; // if the deleting effect is statically unequal to the tuple we don't have to check it
-									criticalVars.insert(actionVars[prevTime][deleter->action]);
-						
-									for (size_t j = 0; j < tuple.size(); j++){
-										int myObjIndex = objToIndex[tuple[j]];
-										
-										int deleterParam = deleter->params[j];
-										if (deleterParam < 0){
-											// its a constant!
-											int deleterConst = -deleterParam-1;
+						//			set<int> criticalVars;
+						//			bool noNeed = false; // if the deleting effect is statically unequal to the tuple we don't have to check it
+						//			criticalVars.insert(actionVars[prevTime][deleter->action]);
+						//
+						//			for (size_t j = 0; j < tuple.size(); j++){
+						//				int myObjIndex = objToIndex[tuple[j]];
+						//				
+						//				int deleterParam = deleter->params[j];
+						//				if (deleterParam < 0){
+						//					// its a constant!
+						//					int deleterConst = -deleterParam-1;
 
-											if (deleterConst != myObjIndex){
-												noNeed = true;
-											}
-											//else equals no nothing to assert
-										} else
-											criticalVars.insert(parameterVars[prevTime][deleterParam][myObjIndex]);
-									}
+						//					if (deleterConst != myObjIndex){
+						//						noNeed = true;
+						//					}
+						//					//else equals no nothing to assert
+						//				} else
+						//					criticalVars.insert(parameterVars[prevTime][deleterParam][myObjIndex]);
+						//			}
 
-									if (noNeed) continue;
+						//			if (noNeed) continue;
 
-									criticalVars.insert(suppOptions[i]);
+						//			criticalVars.insert(suppOptions[i]);
 
-									notAll(solver,criticalVars);
-								}
-							}
-						}
+						//			notAll(solver,criticalVars);
+						//		}
+						//	}
+						//}
 					}
 				}
 
@@ -869,65 +877,62 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 									} // else two constants, this has been checked statically
 								}
 							}
-
-
-
-							// no deleter in between
-							for (int deleterTime = i-1; deleterTime < planLength - 1; deleterTime++){
-								for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
-									Achiever* deleter = myAchievers->destroyers[del];
-
-									vector<int> criticalVars;
-									bool noNeed = false; // if the deleting effect is statically unequal to the tuple we don't have to check it
-									criticalVars.push_back(actionVars[deleterTime][deleter->action]);
-						
-									for (size_t k = 0; k < achiever->params.size(); k++){
-										int deleterParam = deleter->params[k];
-										
-										if (!precObjec.arguments[k].constant){
-											int myParam = precObjec.arguments[k].index; // my index position
-											
-											// both are actual variables
-											if (deleterParam >= 0){
-												criticalVars.push_back(parameterEquality[myParam][deleterTime][deleterParam]);
-											} else {
-												// deleter is a constant
-												int deleterConst  = -deleterParam-1;
-												criticalVars.push_back(parameterVars[time][myParam][objToIndex[deleterConst]]);
-											}
-										} else {
-											int myConst = precObjec.arguments[k].index; // my index position
-											
-											// deleter is a variable
-											if (deleterParam >= 0){
-												criticalVars.push_back(parameterVars[deleterTime][deleterParam][objToIndex[myConst]]);
-											} else if (myConst != -deleterParam-1)
-												noNeed = true;
-											//else equals no nothing to assert
-										}
-									}
-
-									if (noNeed) continue;
-									criticalVars.push_back(achieverVar);
-									
-									if (allDifferentActions){
-										criticalVars.push_back(actionVar);
-										criticalVars.push_back(precSupporter[prec][i]);
-									}
-									//cout << "CRIT";
-									//for (int x : criticalVars)
-									//	cout << " " << x << " " << capsule.variableNames[x];
-									//cout << endl;
-
-									set<int> temp(criticalVars.begin(), criticalVars.end());
-									notAll(solver,temp);
-								}
-							}
 						}
 						impliesOr(solver,actionVar,precSupporter[prec][i],achieverSelection);
 					}
 				}
+
+
+				// no deleter in between
+				for (int deleterTime = 0; deleterTime < planLength - 1; deleterTime++){
+					for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
+						Achiever* deleter = myAchievers->destroyers[del];
+
+						vector<int> criticalVars;
+						bool noNeed = false; // if the deleting effect is statically unequal to the tuple we don't have to check it
+						criticalVars.push_back(actionVars[deleterTime][deleter->action]);
 			
+						for (size_t k = 0; k < deleter->params.size(); k++){
+							int deleterParam = deleter->params[k];
+							
+							if (!precObjec.arguments[k].constant){
+								int myParam = precObjec.arguments[k].index; // my index position
+								
+								// both are actual variables
+								if (deleterParam >= 0){
+									criticalVars.push_back(parameterEquality[myParam][deleterTime][deleterParam]);
+								} else {
+									// deleter is a constant
+									int deleterConst  = -deleterParam-1;
+									criticalVars.push_back(parameterVars[time][myParam][objToIndex[deleterConst]]);
+								}
+							} else {
+								int myConst = precObjec.arguments[k].index; // my index position
+								
+								// deleter is a variable
+								if (deleterParam >= 0){
+									criticalVars.push_back(parameterVars[deleterTime][deleterParam][objToIndex[myConst]]);
+								} else if (myConst != -deleterParam-1)
+									noNeed = true;
+								//else equals no nothing to assert
+							}
+						}
+
+						if (noNeed) continue;
+						
+						criticalVars.push_back(precSupporterOver[prec][deleterTime]);
+						criticalVars.push_back(actionVar);
+						//cout << "CRIT";
+						//for (int x : criticalVars)
+						//	cout << " " << x << " " << capsule.variableNames[x];
+						//cout << endl;
+
+						set<int> temp(criticalVars.begin(), criticalVars.end());
+						notAll(solver,temp);
+					}
+				}
+
+	
 			}
 		}
 
@@ -1172,14 +1177,16 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 
 		// start the incremental search for a plan	
 		planLength = 0;
+		bool linearIncrease = true;
 		for (int i = 0; i < 10; i++){
-			while (planLength < (1 << i)-1){
-				planLength++;
-				compute_heuristic_sat(s,task,start,solver,capsule,true,false);
-			}
+			if (!linearIncrease)
+				while (planLength < (1 << i)-1){
+					planLength++;
+					compute_heuristic_sat(s,task,start,solver,capsule,true,false);
+				}
 			
 			planLength++;
-			if (compute_heuristic_sat(s,task,start,solver,capsule,false,false)){
+			if (compute_heuristic_sat(s,task,start,solver,capsule,false,linearIncrease)){
 				ipasir_release(solver);
 				cout << "\t\tPlan of length: " << planLength << endl;
 				DEBUG(cout << "\t\tPlan of length: " << planLength << endl);
