@@ -77,7 +77,7 @@ public:
     liftedRP(const Task task);
 
     int compute_heuristic(const DBState & s, const Task& task) final;
-	bool compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & start, void* solver, sat_capsule & capsule);
+	bool compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & start, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep);
 	bool atom_not_satisfied(const DBState &s, const AtomicGoal &atomicGoal) const;
 
     int actionID(int i);

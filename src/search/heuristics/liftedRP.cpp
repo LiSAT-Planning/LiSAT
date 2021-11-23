@@ -522,7 +522,7 @@ std::vector<std::vector<int>> actionVars;
 std::unordered_map<int,int> lastNullary;
 double solverTotal;
 
-bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule) {
+bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep) {
 	// indices: timestep -> parameter -> object
 	for (int time = planLength-1; time < planLength; time++){
 		DEBUG(cout << "Generating time = " << time << endl);
@@ -675,7 +675,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						} else {
 							for(size_t o = 0; o < task.objects.size(); o++){
 								andImpliesNot(solver,actionVar,parameterVars[time][precObjec.arguments[0].index][o], parameterVars[time][precObjec.arguments[1].index][o]);
-								//andImpliesNot(solver,actionVar,parameterVars[time][precObjec.arguments[1].index][o], parameterVars[time][precObjec.arguments[0].index][o]);
 							}
 						}
 					} else {
@@ -947,7 +946,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 
 		actionVars.push_back(actionVarsTime);
-		atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
+		if (forceActionEveryStep) atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
 		atMostOne(solver,capsule,actionVarsTime);
 	
 		
@@ -956,7 +955,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 	int nullaryGoalBlocker = capsule.new_variable();
 	DEBUG(capsule.registerVariable(nullaryGoalBlocker,"nullaryGoalBlocker#" + to_string(planLength)));
-	ipasir_assume(solver,nullaryGoalBlocker);
+	if (!onlyGenerate) ipasir_assume(solver,nullaryGoalBlocker);
 
 	
     for (int g : task.goal.positive_nullary_goals)
@@ -1003,8 +1002,9 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	
 		// don't use later support ... These assumptions are cleared after each call
 		
-		for (size_t time = planLength + 1; time < goalSupporterVars[goal].size(); time++)
-			ipasir_assume(solver,-goalSupporterVars[goal][time]);
+		if (!onlyGenerate)
+			for (size_t time = planLength + 1; time < goalSupporterVars[goal].size(); time++)
+				ipasir_assume(solver,-goalSupporterVars[goal][time]);
 	}
 
 	// this timestep might disable goal achievers ...
@@ -1045,8 +1045,9 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			}
 		}
 	}
-		
 
+	if (onlyGenerate) return false;
+		
 	DEBUG(capsule.printVariables());
 
 	DEBUG(cout << "Starting solver" << endl);
@@ -1065,8 +1066,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	DEBUG(cout << "Solver State: " << state << endl);
 	if (state == 10){
 #if NDEBUG
-		std::clock_t end = std::clock();
-		double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
+		//std::clock_t end = std::clock();
+		//double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
 		//return true;
 #endif
 		DEBUG(printVariableTruth(solver,capsule));
@@ -1170,24 +1171,29 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 
 
 		// start the incremental search for a plan	
-		for (int i = 1; i < 100; i++){
-			planLength = i;
+		planLength = 0;
+		for (int i = 0; i < 10; i++){
+			while (planLength < (1 << i)){
+				planLength++;
+				compute_heuristic_sat(s,task,start,solver,capsule,true,false);
+			}
 			
-			if (compute_heuristic_sat(s,task,start,solver,capsule)){
+
+			if (compute_heuristic_sat(s,task,start,solver,capsule,false,false)){
 				ipasir_release(solver);
 				cout << "\t\tPlan of length: " << planLength << endl;
 				DEBUG(cout << "\t\tPlan of length: " << planLength << endl);
 				exit(0);
-				return i;
+				return planLength;
 			} else {
 				cout << "\t\tNo plan of length: " << planLength << endl;
 				DEBUG(cout << "\t\tNo plan of length: " << planLength << endl);
 				std::clock_t end = std::clock();
 				double time_in_ms = 1000.0 * (end-start) / CLOCKS_PER_SEC;
 				//cout << "Total time: " << fixed << time_in_ms << "ms" << endl;
-				if (time_in_ms > 3000000){
+				if (time_in_ms > 300000000){
 					ipasir_release(solver);
-					return i+1;
+					return planLength + 1;
 				}
 			}
 			//exit(0);
