@@ -38,6 +38,7 @@ struct ActionPrecAchievers {
 
 class liftedRP : public Heuristic {
 private:
+	std::map<std::pair<int, int>, bool> needToType;
     const int largeC = 100000;
     int planLength = 8;
     int maxArity = -1;

@@ -110,10 +110,7 @@ liftedRP::liftedRP(const Task task) {
         }
     }
 
-
-
-
-    cout << "- building achiever lookup table" << endl;
+    cout << "- building achiever lookup tables..." << endl;
     // !!! this code assumes the non-sparse (i.e. transitively closed) typing !!!
     for (tSize iAction = 0; iAction < task.actions.size(); iAction++) {
         auto consumer = task.actions[iAction];
@@ -287,6 +284,49 @@ liftedRP::liftedRP(const Task task) {
         }
     }
 
+    DEBUG(
+    for (auto pred : task.predicates) {
+        cout << pred.getName();
+        for(auto type: pred.getTypes()) {
+            cout << " " << task.type_names[type];
+        }
+        cout << endl;
+    });
+
+    // typing needs to be done when the precondition predicate is less specific than the action's parameter type
+    for (size_t iAct = 0; iAct < task.actions.size(); iAct++) {
+        auto precs = task.actions[iAct].get_precondition();
+        auto args = task.actions[iAct].get_parameters();
+        for (size_t iArg = 0; iArg < args.size(); iArg++) {
+            needToType[make_pair(iAct, iArg)] = true;
+        }
+        for (size_t iPrec = 0; iPrec < precs.size(); iPrec++) {
+            auto prec = precs[iPrec];
+            for (size_t iPrecArg = 0; iPrecArg < prec.arguments.size(); iPrecArg++) {
+                if (!prec.arguments[iPrecArg].constant) {
+                    const int var = prec.arguments[iPrecArg].index;
+                    const int actionType = args[var].type;
+                    const int precType = task.predicates[prec.predicate_symbol].getTypes()[iPrecArg];
+                    if (parents[actionType].find(precType) == parents[actionType].end()) {
+                        needToType[make_pair(iAct, var)] = false;
+                    }
+                }
+            }
+        }
+	DEBUG(
+        cout << "action: " << task.actions[iAct].get_name();
+        for (int j = 0; j < args.size(); j++) {
+            if (needToType[make_pair(iAct, j)]) {
+                cout << " T";
+            } else {
+                cout << " F";
+            }
+        }
+        cout << endl;);
+
+    }
+
+	DEBUG(
     cout << "found achievers:" << endl;
     for (tSize iAction = 0; iAction < task.actions.size(); iAction++) {
         cout << "- action '" << task.actions[iAction].get_name() << "'";
@@ -362,7 +402,7 @@ liftedRP::liftedRP(const Task task) {
             auto achieverAction = task.actions[ach->action];
             cout << endl << "    - '" << achieverAction.get_name() << "'";
         }
-    }
+    });
 
     // make directional if there are multiple identical types
 	for (int i = 0; i < numTypes; i++) {
@@ -619,7 +659,12 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
             auto params = task.actions[action].get_parameters();
             for (size_t l = 0; l < params.size(); l++) {
                 DEBUG(cout << "\t\t" << task.type_names[params[l].type] << ": ");
-                int lower = lowerTindex[params[l].type];
+                if (!needToType[{action,l}]){
+                	DEBUG(cout << "no need to type " << endl);
+					continue;
+				}
+				
+				int lower = lowerTindex[params[l].type];
                 int upper = upperTindex[params[l].type];
                 DEBUG(for (int m = lower; m <= upper; m++) {
                     cout << task.objects[indexToObj[m]].getName() << " ";
