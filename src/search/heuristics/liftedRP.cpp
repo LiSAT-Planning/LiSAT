@@ -906,11 +906,15 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						// not equals
 						if (precObjec.arguments[0].constant){
 							int myObjIndex = objToIndex[varA];
+							varB = actionArgumentPositions[action][varB];
 							impliesNot(solver,actionVar, parameterVars[time][varB][myObjIndex - lowerTindex[typeOfArgument[varB]]]);
 						} else if (precObjec.arguments[1].constant){
 							int myObjIndex = objToIndex[varB];
+							varA = actionArgumentPositions[action][varA];
 							impliesNot(solver,actionVar, parameterVars[time][varA][myObjIndex - lowerTindex[typeOfArgument[varA]]]);
 						} else {
+							varA = actionArgumentPositions[action][varA];
+							varB = actionArgumentPositions[action][varB];
 							for(size_t o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
 									o < min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
 								andImpliesNot(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
@@ -921,11 +925,15 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						// equals
 						if (precObjec.arguments[0].constant){
 							int myObjIndex = objToIndex[varA];
+							varB = actionArgumentPositions[action][varB];
 							implies(solver,actionVar, parameterVars[time][varB][myObjIndex - lowerTindex[typeOfArgument[varB]]]);
 						} else if (precObjec.arguments[1].constant){
 							int myObjIndex = objToIndex[varB];
+							varA = actionArgumentPositions[action][varA];
 							implies(solver,actionVar, parameterVars[time][varA][myObjIndex - lowerTindex[typeOfArgument[varA]]]);
 						} else {
+							varA = actionArgumentPositions[action][varA];
+							varB = actionArgumentPositions[action][varB];
 							for(size_t o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
 									o < min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
 								andImplies(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
