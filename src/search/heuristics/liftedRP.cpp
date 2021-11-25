@@ -1040,47 +1040,63 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								}
 							}
 						} else {
-							for (int lastPos = 0; lastPos < precObjec.arguments.size() - 1 ; lastPos++){
-								//cout << "Last Pos " << lastPos << endl;
-								map<vector<int>,set<int>> possibleUpto;
-
-								// build assignment tuple up to this point
+							if (precObjec.arguments.size() == 1){
+								vector<int> possibleValues;
+								
 								for (size_t i = 0; i < supportingTuples.size(); i++){
-									//cout << "Tuple " << i << endl;
 									vector<int> tuple = supportingTuples[i].first;
-									vector<int> subTuple;
-									subTuple.push_back(actionVar);
-									for (size_t j = 0; j <= lastPos; j++){
-										int myObjIndex = objToIndex[tuple[j]];
-										int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
-										int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
-										
-										subTuple.push_back(constantVar);
-									}
-
-
-									int myObjIndex = objToIndex[tuple[lastPos + 1]];
-									int myParam = actionArgumentPositions[action][precObjec.arguments[lastPos + 1].index];
+								
+									int myObjIndex = objToIndex[tuple[0]];
+									int myParam = actionArgumentPositions[action][precObjec.arguments[0].index];
 									int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
-									possibleUpto[subTuple].insert(constantVar);
+									
+									possibleValues.push_back(constantVar);
 								}
-
-								for (auto & x : possibleUpto){
-									andImpliesOr(solver,x.first,x.second);
-									//for (int i : x.first) cout << " - " << capsule.variableNames[i];
-									//for (int i : x.second) cout << " " << capsule.variableNames[i];
-									//cout << endl;
-								}
-
-								if (lastPos == 0){
-									vector<int> initial;
-									for (auto & x : possibleUpto)
-										initial.push_back(x.first[1]);
-
-									impliesOr(solver,actionVar,initial);
-									//cout << "- " << capsule.variableNames[actionVar];
-									//for (int i : initial) cout << " " << capsule.variableNames[i];
-									//cout << endl;
+								impliesOr(solver,actionVar,possibleValues);
+							} else {
+	
+								for (int lastPos = 0; lastPos < precObjec.arguments.size() - 1 ; lastPos++){
+									//cout << "Last Pos " << lastPos << endl;
+									map<vector<int>,set<int>> possibleUpto;
+	
+									// build assignment tuple up to this point
+									for (size_t i = 0; i < supportingTuples.size(); i++){
+										//cout << "Tuple " << i << endl;
+										vector<int> tuple = supportingTuples[i].first;
+										vector<int> subTuple;
+										subTuple.push_back(actionVar);
+										for (size_t j = 0; j <= lastPos; j++){
+											int myObjIndex = objToIndex[tuple[j]];
+											int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+											int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
+											
+											subTuple.push_back(constantVar);
+										}
+	
+	
+										int myObjIndex = objToIndex[tuple[lastPos + 1]];
+										int myParam = actionArgumentPositions[action][precObjec.arguments[lastPos + 1].index];
+										int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
+										possibleUpto[subTuple].insert(constantVar);
+									}
+	
+									for (auto & x : possibleUpto){
+										andImpliesOr(solver,x.first,x.second);
+										//for (int i : x.first) cout << " - " << capsule.variableNames[i];
+										//for (int i : x.second) cout << " " << capsule.variableNames[i];
+										//cout << endl;
+									}
+	
+									if (lastPos == 0){
+										vector<int> initial;
+										for (auto & x : possibleUpto)
+											initial.push_back(x.first[1]);
+	
+										impliesOr(solver,actionVar,initial);
+										//cout << "- " << capsule.variableNames[actionVar];
+										//for (int i : initial) cout << " " << capsule.variableNames[i];
+										//cout << endl;
+									}
 								}
 							}
 						}
