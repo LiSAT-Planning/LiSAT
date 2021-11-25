@@ -13,6 +13,12 @@
 
 using namespace std;
 
+map<int,map<int,int>> actionArgumentPositions;
+int numberOfArgumentPositions = 0;
+map<int,int> firstArgumentOfType;
+map<int,int> typeOfArgument;
+
+
 liftedRP::liftedRP(const Task task) {
     numActions = task.actions.size();
     numObjs = task.objects.size();
@@ -32,18 +38,40 @@ liftedRP::liftedRP(const Task task) {
 			if (maxNum[p.first] < p.second)
 				maxNum[p.first] = p.second;
     }
+
+	for (auto p : maxNum){
+		firstArgumentOfType[p.first] = numberOfArgumentPositions;
+		for (int i = numberOfArgumentPositions; i < numberOfArgumentPositions + p.second; i++)
+			typeOfArgument[i] = p.first;
+		numberOfArgumentPositions += p.second;
+	}
+
+
+	for (auto a: task.actions) {
+		map<int,int> thisCount;
+		for (auto para : a.get_parameters()){
+			actionArgumentPositions[a.get_index()][para.index] = firstArgumentOfType[para.type] + thisCount[para.type];
+			thisCount[para.type] += 1;
+		}
+
+		
+		cout << "Action #" << a.get_index() << " "  << a.get_name() << ":";
+		for (auto [a,b] : actionArgumentPositions[a.get_index()])
+			cout << " " << a << "->" << b;
+		cout << endl;
+	}
+
+
     for (size_t obj = 0; obj < task.objects.size(); obj++) {
         auto oTypes = task.objects[obj].getTypes();
         for (size_t i = 0; i < oTypes.size(); i++)
 			objCount[oTypes[i]] += 1;
 	}
 
-	int ss = 0;
 	for (auto p : maxNum){
-		cout << "T " << setw(2) << p.first << " # " << setw(2) << p.second << " size " << setw(3) << objCount[p.first] << endl;
-		ss += p.second;
+		cout << "T " << setw(2) << p.first << " # " << setw(2) << p.second << " size " << setw(5) << objCount[p.first] << endl;
 	}
-	cout << "Max Arity: " << maxArity << " diffSum: " << ss << endl; 
+	cout << "Max Arity: " << maxArity << " diffSum: " << numberOfArgumentPositions << endl; 
 	//exit(0);
     
     cout << "- re-inferring type hierarchy..." << endl;
@@ -493,7 +521,7 @@ liftedRP::liftedRP(const Task task) {
     cout << "- max arity " << maxArity << endl;
 
     for (tSize i = 0; i < task.predicates.size(); i++) {
-        cout << i << " " << task.predicates[i].getName() << endl;
+        cout << i << " " << task.predicates[i].getName() << " isStatic " << task.predicates[i].isStaticPredicate() << endl;
     }
 
 	DEBUG(
@@ -623,7 +651,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								//cout << myParam << " " << theirParam << " " << upper - lower + 1 << endl;
 							
                 				for (int m = lower; m <= upper; m++)
-									equalsPairs[{myParam,theirParam}].insert(m);
+									equalsPairs[{actionArgumentPositions[action][myParam],actionArgumentPositions[achiever->action][theirParam]}].insert(m);
 							}
 						} 
 					}
@@ -645,19 +673,22 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							int myType = task.actions[action].get_parameters()[myParam].type;
 							int theirType = task.actions[deleter->action].get_parameters()[deleterParam].type; 
 
-							int lower = max(lowerTindex[myType],lowerTindex[theirType]);
-				            int upper = min(upperTindex[myType],upperTindex[theirType]);
-							//cout << myParam << " " << deleterParam << " " << upper - lower + 1 << endl;
+							int lower = min(lowerTindex[myType],lowerTindex[theirType]);
+				            int upper = max(upperTindex[myType],upperTindex[theirType]);
                 				
 							for (int m = lower; m <= upper; m++)
-								equalsPairs[{myParam,deleterParam}].insert(m);
+								equalsPairs[{actionArgumentPositions[action][myParam],actionArgumentPositions[deleter->action][deleterParam]}].insert(m);
 						}
 					}
 				}
 			}
-			
 		}
 	}
+
+	DEBUG(
+		for (auto x : equalsPairs)
+			cout << "\t\tEquals Pair: " << x.first.first << " " << x.first.second << ": " << x.second.size() << endl;
+			);
 
 
 
@@ -675,14 +706,18 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		}
 
 		//cout << "O " << task.objects.size() << " A " << maxArity << endl;
-		std::vector<std::vector<int>> parameterVarsTime(maxArity);
-    	for (int paramter = 0; paramter < maxArity; paramter++){
-			parameterVarsTime[paramter].resize(task.objects.size());
+		std::vector<std::vector<int>> parameterVarsTime(numberOfArgumentPositions);
+    	for (int paramter = 0; paramter < numberOfArgumentPositions; paramter++){
+			int type = typeOfArgument[paramter];
+			int lower = lowerTindex[type];
+			int upper = upperTindex[type];
+			
+			parameterVarsTime[paramter].resize(upper - lower + 1);
 
-			for (size_t o = 0; o < task.objects.size(); o++){
+			for (size_t o = 0; o < upper - lower + 1; o++){
 				int objectVar = capsule.new_variable();
 				parameterVarsTime[paramter][o] = objectVar;
-				DEBUG(capsule.registerVariable(objectVar, "const@" + to_string(time) + "#" + to_string(paramter) + "-" + task.objects[indexToObj[o]].getName()));
+				DEBUG(capsule.registerVariable(objectVar, "const@" + to_string(time) + "#" + to_string(paramter) + "-" + task.objects[indexToObj[o + lower]].getName()));
 			}
 			// each parameter can have at most one value
 			atMostOne(solver,capsule,parameterVarsTime[paramter]);
@@ -729,14 +764,17 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 		/// Variables tracking equality of task parameters	
 		std::vector<std::vector<std::vector<int>>> parameterEquality;
-    	cout << "EQ " << maxArity << " " << time << " " << task.objects.size() << endl;
-		for (int paramterThis = 0; paramterThis < maxArity; paramterThis++){
+		DEBUG(cout << "NAP " << numberOfArgumentPositions << endl);
+		for (int paramterThis = 0; paramterThis < numberOfArgumentPositions; paramterThis++){
+			DEBUG(cout << "NAP A " << paramterThis << endl);
     		vector<vector<int>> equalVarsP;
 			for (int pTime = 0; pTime < time; pTime++){
     			vector<int> equalVarsB;
-				for (int paramterBefore = 0; paramterBefore < maxArity; paramterBefore++){
+				for (int paramterBefore = 0; paramterBefore < numberOfArgumentPositions; paramterBefore++){
+					DEBUG(cout << paramterThis << " = " << paramterBefore << " @ " << pTime); 
 					if (!equalsPairs.count({paramterThis,paramterBefore})){
 						equalVarsB.push_back(0); // illegal variable
+						DEBUG(cout << " not relevant" << endl); 
 						continue;
 					}
 
@@ -744,14 +782,27 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					equalVarsB.push_back(equalsVar);
 					DEBUG(capsule.registerVariable(equalsVar, "equal@" + to_string(time) + "#" + to_string(paramterThis) + "@" + to_string(pTime) + "#" + to_string(paramterBefore)));
 				
-					if (equalsPairs[{paramterThis,paramterBefore}].size() == 1)
+					if (equalsPairs[{paramterThis,paramterBefore}].size() == 1){
+						DEBUG(cout << " always true" << endl); 
 						assertYes(solver,equalsVar);
-					else
+					} else {
+						int thisLower = lowerTindex[typeOfArgument[paramterThis]];
+						int beforeLower = lowerTindex[typeOfArgument[paramterBefore]];
 						for(int o : equalsPairs[{paramterThis,paramterBefore}]){
-							andImplies(solver,equalsVar, parameterVars[time][paramterThis][o], parameterVars[pTime][paramterBefore][o]);
-							andImplies(solver,equalsVar, parameterVars[pTime][paramterBefore][o], parameterVars[time][paramterThis][o]);
-							andImplies(solver,parameterVars[pTime][paramterBefore][o], parameterVars[time][paramterThis][o], equalsVar);
+							if (o < lowerTindex[typeOfArgument[paramterThis]] || o > upperTindex[typeOfArgument[paramterThis]])
+								impliesNot(solver,equalsVar, parameterVars[pTime][paramterBefore][o-beforeLower]);
+							else if (o < lowerTindex[typeOfArgument[paramterBefore]] || o > upperTindex[typeOfArgument[paramterBefore]])
+								impliesNot(solver,equalsVar, parameterVars[pTime][paramterThis][o-thisLower]);
+							else {
+								// need to subtract the starting values of the types
+								andImplies(solver,equalsVar, parameterVars[time][paramterThis][o-thisLower], parameterVars[pTime][paramterBefore][o-beforeLower]);
+								andImplies(solver,equalsVar, parameterVars[pTime][paramterBefore][o-beforeLower], parameterVars[time][paramterThis][o-thisLower]);
+								andImplies(solver,parameterVars[pTime][paramterBefore][o-beforeLower], parameterVars[time][paramterThis][o-thisLower], equalsVar);
+							}
 						}
+						int sz = equalsPairs[{paramterThis,paramterBefore}].size();
+						DEBUG(cout << " generated " << sz << endl); 
+					}
 				}
 				equalVarsP.push_back(equalVarsB);
 			}
@@ -759,6 +810,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		}
 		
 		equals += get_number_of_clauses() - bef;
+		DEBUG(cout << "EQUALS clauses " << equals << endl);
+		//exit(0);
 		bef = get_number_of_clauses();
 
 		/// action variables
@@ -775,6 +828,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			// typing implications!
             auto params = task.actions[action].get_parameters();
             for (size_t l = 0; l < params.size(); l++) {
+				int thisParameterIndex = actionArgumentPositions[action][l];
                 DEBUG(cout << "\t\t" << task.type_names[params[l].type] << ": ");
                 //if (!needToType[{action,l}]){
                 //	DEBUG(cout << "no need to type " << endl);
@@ -788,33 +842,33 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
                 }
                 cout << endl);
 
-				for (int i = 0; i < lower; i++){
-					int parameterConstantVar = parameterVars[time][l][i];
-					impliesNot(solver,actionVar,parameterConstantVar);
-				}
+				//for (int i = 0; i < lower; i++){
+				//	int parameterConstantVar = parameterVars[time][l][i];
+				//	impliesNot(solver,actionVar,parameterConstantVar);
+				//}
 
-				for (int i = upper + 1; i < int(task.objects.size()); i++){
-					int parameterConstantVar = parameterVars[time][l][i];
-					impliesNot(solver,actionVar,parameterConstantVar);
-				}
+				//for (int i = upper + 1; i < int(task.objects.size()); i++){
+				//	int parameterConstantVar = parameterVars[time][l][i];
+				//	impliesNot(solver,actionVar,parameterConstantVar);
+				//}
 
 				std::vector<int> allowed;
-				for (int i = lower; i <= upper; i++){
-					int parameterConstantVar = parameterVars[time][l][i];
+				for (int i = 0; i <= upper - lower; i++){
+					int parameterConstantVar = parameterVars[time][thisParameterIndex][i];
 					allowed.push_back(parameterConstantVar);
 				}
 				impliesOr(solver,actionVar,allowed);
             }
 
-
 			// TODO this is actually not necessary ... I will never access these variables anyway
-            for (int l = params.size(); l < maxArity; l++) {
-				impliesAllNot(solver,actionVar,parameterVars[time][l]);
-			}
+            //for (int l = params.size(); l < maxArity; l++) {
+			//	impliesAllNot(solver,actionVar,parameterVars[time][l]);
+			//}
 		
 			actionTyping += get_number_of_clauses() - bef;
 			bef = get_number_of_clauses();
 
+            DEBUG(cout << "\t\tnullary" << endl);
 
 
 			// nullary preconditions
@@ -830,12 +884,13 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			
 			nullary += get_number_of_clauses() - bef;
 			bef = get_number_of_clauses();
-
+			
 
 			// if this action is chosen, it has to be executable
 			// this means that every precondition is supported by a prior action or the initial state
 	        const auto precs = task.actions[action].get_precondition();
 	        for (size_t prec = 0; prec < precs.size(); prec++) {
+            	DEBUG(cout << "\t\tprecondition #" << prec << endl);
             	
 				const auto & precObjec = precs[prec];
 				int predicate = precObjec.predicate_symbol;
@@ -844,31 +899,39 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				bef = get_number_of_clauses();
 				
 				if (task.predicates[predicate].getName().rfind("=", 0) == 0){
+					int varA = precObjec.arguments[0].index;
+					int varB = precObjec.arguments[1].index;
+
 					if (precObjec.negated){
 						// not equals
 						if (precObjec.arguments[0].constant){
-							int myObjIndex = objToIndex[precObjec.arguments[0].index];
-							impliesNot(solver,actionVar, parameterVars[time][1][myObjIndex]);
+							int myObjIndex = objToIndex[varA];
+							impliesNot(solver,actionVar, parameterVars[time][varB][myObjIndex - lowerTindex[typeOfArgument[varB]]]);
 						} else if (precObjec.arguments[1].constant){
-							int myObjIndex = objToIndex[precObjec.arguments[1].index];
-							impliesNot(solver,actionVar, parameterVars[time][0][myObjIndex]);
+							int myObjIndex = objToIndex[varB];
+							impliesNot(solver,actionVar, parameterVars[time][varA][myObjIndex - lowerTindex[typeOfArgument[varA]]]);
 						} else {
-							for(size_t o = 0; o < task.objects.size(); o++){
-								andImpliesNot(solver,actionVar,parameterVars[time][precObjec.arguments[0].index][o], parameterVars[time][precObjec.arguments[1].index][o]);
+							for(size_t o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
+									o < min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
+								andImpliesNot(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
+										parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]]);
 							}
 						}
 					} else {
 						// equals
 						if (precObjec.arguments[0].constant){
-							int myObjIndex = objToIndex[precObjec.arguments[0].index];
-							implies(solver,actionVar, parameterVars[time][1][myObjIndex]);
+							int myObjIndex = objToIndex[varA];
+							implies(solver,actionVar, parameterVars[time][varB][myObjIndex - lowerTindex[typeOfArgument[varB]]]);
 						} else if (precObjec.arguments[1].constant){
-							int myObjIndex = objToIndex[precObjec.arguments[1].index];
-							implies(solver,actionVar, parameterVars[time][0][myObjIndex]);
+							int myObjIndex = objToIndex[varB];
+							implies(solver,actionVar, parameterVars[time][varA][myObjIndex - lowerTindex[typeOfArgument[varA]]]);
 						} else {
-							for(size_t o = 0; o < task.objects.size(); o++){
-								andImplies(solver,actionVar,parameterVars[time][precObjec.arguments[0].index][o], parameterVars[time][precObjec.arguments[1].index][o]);
-								andImplies(solver,actionVar,parameterVars[time][precObjec.arguments[1].index][o], parameterVars[time][precObjec.arguments[0].index][o]);
+							for(size_t o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
+									o < min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
+								andImplies(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
+										parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]]);
+								andImplies(solver,actionVar,parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]],
+										parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]]);
 							}
 						}
 					}
@@ -894,7 +957,22 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					
 					// this is the correct predicate
     			    for (vector<int> groundA: tuple) {
-    			    	supportingTuples.push_back({groundA,true});
+						bool notApplicable = false;
+						for (size_t j = 0; j < groundA.size(); j++){
+							int myObjIndex = objToIndex[groundA[j]];
+							if (precObjec.arguments[j].constant){
+								if (precObjec.arguments[j].index != groundA[j])
+									notApplicable = true;
+							} else {
+								int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+								if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
+										myObjIndex > upperTindex[typeOfArgument[myParam]])
+									notApplicable = true;
+							}
+						}
+    			    	
+						if (notApplicable) continue;
+						supportingTuples.push_back({groundA,true});
 					}
     			}
 
@@ -905,7 +983,22 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					if (predicate != rel.predicate_symbol) continue;
     			    
 					for (vector<int> groundA: tuple) {
-    			    	supportingTuples.push_back({groundA,false});
+   						bool notApplicable = false;
+						for (size_t j = 0; j < groundA.size(); j++){
+							int myObjIndex = objToIndex[groundA[j]];
+							if (precObjec.arguments[j].constant){
+								if (precObjec.arguments[j].index != groundA[j])
+									notApplicable = true;
+							} else {
+								int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+								if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
+										myObjIndex > upperTindex[typeOfArgument[myParam]])
+									notApplicable = true;
+							}
+						}
+    			    	
+						if (notApplicable) continue;
+ 				    	supportingTuples.push_back({groundA,false});
     			    }
     			}
 				
@@ -918,6 +1011,70 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					DEBUG(cout << "\t\tno init support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 					impliesNot(solver,actionVar,precSupporter[prec][0]); // cannot be supported by init!
 				} else {
+					if (task.predicates[predicate].isStaticPredicate()){
+						//cout << task.predicates[predicate].getName() << endl;
+						//cout << supportingTuples.size() << " " << precObjec.arguments.size() << endl;
+
+						if (supportingTuples.size() == 1){
+							// if this action is chosen, exactly this tuple has to be used as the precondition
+							vector<int> tuple = supportingTuples[0].first;
+							for (size_t j = 0; j < tuple.size(); j++){
+								int myObjIndex = objToIndex[tuple[j]];
+								if (precObjec.arguments[j].constant){
+									if (precObjec.arguments[j].index != tuple[j])
+										assertNot(solver,actionVar);
+								} else {
+									int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+									if (myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]])
+										assertNot(solver,actionVar);
+									else
+										implies(solver,actionVar, parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+								}
+							}
+						} else {
+							for (int lastPos = 0; lastPos < precObjec.arguments.size() - 1 ; lastPos++){
+								//cout << "Last Pos " << lastPos << endl;
+								map<vector<int>,set<int>> possibleUpto;
+
+								// build assignment tuple up to this point
+								for (size_t i = 0; i < supportingTuples.size(); i++){
+									//cout << "Tuple " << i << endl;
+									vector<int> tuple = supportingTuples[i].first;
+									vector<int> subTuple;
+									subTuple.push_back(actionVar);
+									for (size_t j = 0; j <= lastPos; j++){
+										int myObjIndex = objToIndex[tuple[j]];
+										int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+										int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
+										
+										subTuple.push_back(constantVar);
+									}
+
+
+									int myObjIndex = objToIndex[tuple[lastPos + 1]];
+									int myParam = actionArgumentPositions[action][precObjec.arguments[lastPos + 1].index];
+									int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
+									possibleUpto[subTuple].insert(constantVar);
+								}
+
+								for (auto & x : possibleUpto){
+									andImpliesOr(solver,x.first,x.second);
+								}
+
+								if (lastPos == 0){
+									vector<int> initial;
+									for (auto & x : possibleUpto)
+										initial.push_back(x.first[0]);
+
+									impliesOr(solver,actionVar,initial);
+								}
+							}
+						}
+						
+						continue;
+					}
+
+
 					DEBUG(cout << "\t\tinit support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 					vector<int> suppOptions;
 					for (size_t i = 0; i < supportingTuples.size(); i++){
@@ -937,45 +1094,13 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								if (precObjec.arguments[j].index != tuple[j])
 									assertNot(solver,suppOptions[i]);
 							} else {
-								int myParam = precObjec.arguments[j].index;
-								implies(solver,suppOptions[i], parameterVars[time][myParam][myObjIndex]);
+								int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+								if (myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]])
+									assertNot(solver,suppOptions[i]);
+								else
+									implies(solver,suppOptions[i], parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
 							}
 						}
-
-						//// if init fact is not static, it may not be destroyed on the way ...
-						//if (!supportingTuples[i].second){
-						//	for (int prevTime = 0; prevTime < planLength-1; prevTime++){
-						//		for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
-						//			Achiever* deleter = myAchievers->destroyers[del];
-
-						//			set<int> criticalVars;
-						//			bool noNeed = false; // if the deleting effect is statically unequal to the tuple we don't have to check it
-						//			criticalVars.insert(actionVars[prevTime][deleter->action]);
-						//
-						//			for (size_t j = 0; j < tuple.size(); j++){
-						//				int myObjIndex = objToIndex[tuple[j]];
-						//				
-						//				int deleterParam = deleter->params[j];
-						//				if (deleterParam < 0){
-						//					// its a constant!
-						//					int deleterConst = -deleterParam-1;
-
-						//					if (deleterConst != myObjIndex){
-						//						noNeed = true;
-						//					}
-						//					//else equals no nothing to assert
-						//				} else
-						//					criticalVars.insert(parameterVars[prevTime][deleterParam][myObjIndex]);
-						//			}
-
-						//			if (noNeed) continue;
-
-						//			criticalVars.insert(suppOptions[i]);
-
-						//			notAll(solver,criticalVars);
-						//		}
-						//	}
-						//}
 					}
 				}
 				initSupp += get_number_of_clauses() - bef;
@@ -1025,22 +1150,23 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								int theirParam = achiever->params[k];
 								
 								if (!precObjec.arguments[k].constant){
-									int myParam = precObjec.arguments[k].index; // my index position
+									int myParam = actionArgumentPositions[action][precObjec.arguments[k].index]; // my index position
 
 									if (theirParam < 0){
 										int theirConst  = -theirParam-1;
 										if (!allDifferentActions)
-											implies(solver,achieverVar,parameterVars[time][myParam][objToIndex[theirConst]]);
+											implies(solver,achieverVar,parameterVars[time][myParam][objToIndex[theirConst] - lowerTindex[typeOfArgument[myParam]]]);
 										else
-											andImplies(solver,actionVar,precSupporter[prec][i],achieverVar,parameterVars[time][myParam][objToIndex[theirConst]]);
+											andImplies(solver,actionVar,precSupporter[prec][i],achieverVar,parameterVars[time][myParam][objToIndex[theirConst] - lowerTindex[typeOfArgument[myParam]]]);
 									} else {
-										int myType = task.actions[action].get_parameters()[myParam].type;
+										int myType = task.actions[action].get_parameters()[precObjec.arguments[k].index].type;
 										int theirType = task.actions[achiever->action].get_parameters()[theirParam].type; 
-
-										int lower = max(lowerTindex[myType],lowerTindex[theirType]);
-						                int upper = min(upperTindex[myType],upperTindex[theirType]);
+										
+										int lower = min(lowerTindex[myType],lowerTindex[theirType]);
+						                int upper = max(upperTindex[myType],upperTindex[theirType]);
 
 										// then only one value is actually possible to we know that equality holds!
+										theirParam = actionArgumentPositions[achiever->action][theirParam];
 										if (lower != upper){
 											if (!allDifferentActions){
 												implies(solver,achieverVar,parameterEquality[myParam][i-1][theirParam]);
@@ -1055,11 +1181,12 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 									int myConst = precObjec.arguments[k].index; // my const ID
 									
 									if (theirParam >= 0){
+										theirParam = actionArgumentPositions[achiever->action][theirParam];
 
 										if (!allDifferentActions)
-											implies(solver,achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst]]);
+											implies(solver,achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
 										else
-											andImplies(solver,actionVar,precSupporter[prec][i],achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst]]);
+											andImplies(solver,actionVar,precSupporter[prec][i],achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
 									
 									} // else two constants, this has been checked statically
 								}
@@ -1092,8 +1219,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 									int myType = task.actions[action].get_parameters()[myParam].type;
 									int theirType = task.actions[deleter->action].get_parameters()[deleterParam].type; 
 
-									int lower = max(lowerTindex[myType],lowerTindex[theirType]);
-					                int upper = min(upperTindex[myType],upperTindex[theirType]);
+									int lower = min(lowerTindex[myType],lowerTindex[theirType]);
+					                int upper = max(upperTindex[myType],upperTindex[theirType]);
+									myParam = actionArgumentPositions[action][myParam];
+									deleterParam = actionArgumentPositions[deleter->action][deleterParam];
 
 									// then only one value is actually possible to we know that equality holds!
 									if (lower != upper){
@@ -1102,14 +1231,16 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								} else {
 									// deleter is a constant
 									int deleterConst  = -deleterParam-1;
-									criticalVars.push_back(parameterVars[time][myParam][objToIndex[deleterConst]]);
+									myParam = actionArgumentPositions[action][myParam];
+									criticalVars.push_back(parameterVars[time][myParam][objToIndex[deleterConst] - lowerTindex[typeOfArgument[myParam]]]);
 								}
 							} else {
 								int myConst = precObjec.arguments[k].index; // my index position
-								
+					
 								// deleter is a variable
 								if (deleterParam >= 0){
-									criticalVars.push_back(parameterVars[deleterTime][deleterParam][objToIndex[myConst]]);
+									deleterParam = actionArgumentPositions[deleter->action][deleterParam];
+									criticalVars.push_back(parameterVars[deleterTime][deleterParam][objToIndex[myConst] - lowerTindex[typeOfArgument[deleterParam]]]);
 								} else if (myConst != -deleterParam-1)
 									noNeed = true;
 								//else equals no nothing to assert
@@ -1133,6 +1264,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				bef = get_number_of_clauses();
 			}
 		}
+		//exit(0);
 
 		// frame axioms for nullary predicates
 		bef = get_number_of_clauses();
@@ -1152,7 +1284,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 
 		actionVars.push_back(actionVarsTime);
-		if (forceActionEveryStep) atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
+		//if (forceActionEveryStep) atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
+		atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
 		atMostOne(solver,capsule,actionVarsTime);
 		oneAction += get_number_of_clauses() - bef;
 	
@@ -1191,18 +1324,17 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				Achiever* achiever = thisGoalAchievers->achievers[j];
 				int achieverVar = capsule.new_variable();
 				achieverSelection.push_back(achieverVar);
-				DEBUG(capsule.registerVariable(achieverVar,
-							"goalAchieve#" + to_string(goal) + 
-							"-" + to_string(pTime) + "_" + to_string(j)));
+				DEBUG(capsule.registerVariable(achieverVar,	"goalAchieve#" + to_string(goal) + "-" + to_string(pTime) + "_" + to_string(j)));
 
 				// if the achiever has been selected then it must be present!
 				implies(solver,achieverVar,actionVars[pTime][achiever->action]);
 				for (size_t k = 0; k < achiever->params.size(); k++){
 					int myConst = goalAtom.args[k]; // my object (main index)
-					int theirParam = achiever->params[k];
+					int theirParam = actionArgumentPositions[achiever->action][achiever->params[k]];
+					
 
 					if (theirParam >= 0){
-						implies(solver,achieverVar, parameterVars[pTime][theirParam][objToIndex[myConst]]);
+						implies(solver,achieverVar, parameterVars[pTime][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
 					} // else it is a constant and has already been checked
 				}
 			}
@@ -1244,10 +1376,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 				for (size_t k = 0; k < destroyer->params.size(); k++){
 					int myConst = goalAtom.args[k]; // my object (main index)
-					int theirParam = destroyer->params[k];
+					int theirParam = actionArgumentPositions[destroyer->action][destroyer->params[k]];
 
 					if (theirParam >= 0){
-						criticalVars.push_back(parameterVars[planLength-1][theirParam][objToIndex[myConst]]);
+						criticalVars.push_back(parameterVars[planLength-1][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
 					} // else it is a constant and has already been checked
 				}
 
@@ -1313,11 +1445,12 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
             	auto params = task.actions[action].get_parameters();
 				vector<int> arguments;
             	for (size_t l = 0; l < params.size(); l++) {
+					int p = actionArgumentPositions[action][l];
 					cout << " " << l << ":";
-					for (size_t o = 0; o < task.objects.size(); o++){
-						if (ipasir_val(solver,parameterVars[time][l][o]) > 0){
-							cout << " " << task.objects[indexToObj[o]].getName();
-							arguments.push_back(indexToObj[o]);
+					for (size_t o = 0; o <= upperTindex[typeOfArgument[p]] - lowerTindex[typeOfArgument[p]]; o++){
+						if (ipasir_val(solver,parameterVars[time][p][o]) > 0){
+							cout << " " << task.objects[indexToObj[o + lowerTindex[typeOfArgument[p]]]].getName();
+							arguments.push_back(indexToObj[o + lowerTindex[typeOfArgument[p]]]);
 						}
 					}
 				}
