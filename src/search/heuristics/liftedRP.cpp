@@ -1067,14 +1067,20 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 								for (auto & x : possibleUpto){
 									andImpliesOr(solver,x.first,x.second);
+									//for (int i : x.first) cout << " - " << capsule.variableNames[i];
+									//for (int i : x.second) cout << " " << capsule.variableNames[i];
+									//cout << endl;
 								}
 
 								if (lastPos == 0){
 									vector<int> initial;
 									for (auto & x : possibleUpto)
-										initial.push_back(x.first[0]);
+										initial.push_back(x.first[1]);
 
 									impliesOr(solver,actionVar,initial);
+									//cout << "- " << capsule.variableNames[actionVar];
+									//for (int i : initial) cout << " " << capsule.variableNames[i];
+									//cout << endl;
 								}
 							}
 						}
