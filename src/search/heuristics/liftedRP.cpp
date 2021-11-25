@@ -916,7 +916,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							varA = actionArgumentPositions[action][varA];
 							varB = actionArgumentPositions[action][varB];
 							for(size_t o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
-									o < min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
+									o <= min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
 								andImpliesNot(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
 										parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]]);
 							}
@@ -935,7 +935,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							varA = actionArgumentPositions[action][varA];
 							varB = actionArgumentPositions[action][varB];
 							for(size_t o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
-									o < min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
+									o <= min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
 								andImplies(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
 										parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]]);
 								andImplies(solver,actionVar,parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]],
