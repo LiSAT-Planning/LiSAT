@@ -605,7 +605,7 @@ int goalAchiever = 0;
 int goalDeleter = 0; 
 
 
-bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep) {
+bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, int pastLimit) {
 	//for (size_t action = 0; action < task.actions.size(); action++){
 	//	for (size_t param = 0; param < task.actions[action].get_parameters().size(); param++){
 	//		int myType = task.actions[action].get_parameters()[param].type;
@@ -761,6 +761,9 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 		precSupport += get_number_of_clauses() - bef;
 		bef = get_number_of_clauses();
+		
+		
+		int startTime = max(0,time-pastLimit);
 
 		/// Variables tracking equality of task parameters	
 		std::vector<std::vector<std::vector<int>>> parameterEquality;
@@ -768,6 +771,14 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		for (int paramterThis = 0; paramterThis < numberOfArgumentPositions; paramterThis++){
 			DEBUG(cout << "NAP A " << paramterThis << endl);
     		vector<vector<int>> equalVarsP;
+			// fill with empty entries
+			//for (int pTime = 0; pTime < startTime; pTime++){
+    		//	vector<int> equalVarsB;
+			//	equalVarsP.push_back(equalVarsB);
+			//}
+
+
+			//for (int pTime = startTime; pTime < time; pTime++){
 			for (int pTime = 0; pTime < time; pTime++){
     			vector<int> equalVarsB;
 				for (int paramterBefore = 0; paramterBefore < numberOfArgumentPositions; paramterBefore++){
@@ -1135,10 +1146,15 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				}
 				initSupp += get_number_of_clauses() - bef;
 				bef = get_number_of_clauses();
-
-				// 3. Step: Supporter of type 2: other actions
-				for (size_t i = 1; i < precSupporter[prec].size(); i++){
-
+				
+				
+				//////// 3. Step: Supporter of type 2: other actions
+				// times not to use
+				for (size_t i = 1; i < startTime + 1; i++)
+					impliesNot(solver,actionVar,precSupporter[prec][i]);
+				
+				// times to use
+				for (size_t i = startTime + 1; i < precSupporter[prec].size(); i++){
 					if (myAchievers->achievers.size() == 0){
 						DEBUG(cout << "\t\tnon-achievable precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 						impliesNot(solver,actionVar,precSupporter[prec][i]);
@@ -1230,7 +1246,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 
 				// no deleter in between
-				for (int deleterTime = 0; deleterTime < planLength - 1; deleterTime++){
+				for (int deleterTime = startTime; deleterTime < planLength - 1; deleterTime++){
 					for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
 						Achiever* deleter = myAchievers->destroyers[del];
 
@@ -1314,8 +1330,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 
 		actionVars.push_back(actionVarsTime);
-		//if (forceActionEveryStep) atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
-		atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
+		if (forceActionEveryStep) atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
+		//atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
 		atMostOne(solver,capsule,actionVarsTime);
 		oneAction += get_number_of_clauses() - bef;
 	
@@ -1503,74 +1519,73 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 	if (satMode){
 		DEBUG(cout << "Parameter arity " << maxArity << " Objects " << task.objects.size() << endl);
-		
-		std::clock_t start = std::clock();
-		void* solver = ipasir_init();
-		sat_capsule capsule;
-		reset_number_of_clauses();
-		int maxPlanLength = 100;
-		solverTotal = 0;
-
-		goalSupporterVars.clear();
-		parameterVars.clear();
-		actionVars.clear();
-
-		// the goal must be achieved!
-		int gc = 0;
-		for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
-			const AtomicGoal & goalAtom = task.goal.goal[goal];
-			std::vector<int> goalSupporter;
-			
-			if (goalAtom.negated) {
-				goalSupporterVars.push_back(goalSupporter);
-				continue; // TODO don't know what to do ...
-			}
-			gc++;
-	
-			//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
-		
-			for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
-				int goalSuppVar = capsule.new_variable();
-				goalSupporter.push_back(goalSuppVar);
-				DEBUG(capsule.registerVariable(goalSuppVar,
-							"goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
-	
-			}
-			if (atom_not_satisfied(s,goalAtom)) assertNot(solver,goalSupporter[0]);	
-			
-			atLeastOne(solver,capsule,goalSupporter);
-			goalSupporterVars.push_back(goalSupporter);
-		}
-
-		// we only test executable plans and if the goal is a dead end ...
-		if (!gc) return 0;
-
-		
-		for (int n : task.nullary_predicates){
-			int nullaryInInit = capsule.new_variable();
-			lastNullary[n] = nullaryInInit;
-			DEBUG(capsule.registerVariable(nullaryInInit,
-						"nullary#" + to_string(n) + "_" + to_string(-1)));
-
-			if (s.get_nullary_atoms()[n])
-				assertYes(solver,nullaryInInit);
-			else
-				assertNot(solver,nullaryInInit);
-		}
-
-
 		// start the incremental search for a plan	
-		planLength = 0;
-		bool linearIncrease = true;
-		for (int i = 0; i < 500; i++){
-			if (!linearIncrease)
-				while (planLength < (1 << i)-1){
-					planLength++;
-					compute_heuristic_sat(s,task,start,solver,capsule,true,false);
+		for (int pastLimit = 1; pastLimit < 105; pastLimit++){
+			cout << "Past Limit " << pastLimit << endl;
+		
+			std::clock_t start = std::clock();
+			void* solver = ipasir_init();
+			sat_capsule capsule;
+			reset_number_of_clauses();
+			int maxPlanLength = 105;
+			solverTotal = 0;
+
+			goalSupporterVars.clear();
+			parameterVars.clear();
+			actionVars.clear();
+
+			// the goal must be achieved!
+			int gc = 0;
+			for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
+				const AtomicGoal & goalAtom = task.goal.goal[goal];
+				std::vector<int> goalSupporter;
+				
+				if (goalAtom.negated) {
+					goalSupporterVars.push_back(goalSupporter);
+					continue; // TODO don't know what to do ...
 				}
+				gc++;
+	
+				//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
 			
+				for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
+					int goalSuppVar = capsule.new_variable();
+					goalSupporter.push_back(goalSuppVar);
+					DEBUG(capsule.registerVariable(goalSuppVar,
+								"goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
+	
+				}
+				if (atom_not_satisfied(s,goalAtom)) assertNot(solver,goalSupporter[0]);	
+				
+				atLeastOne(solver,capsule,goalSupporter);
+				goalSupporterVars.push_back(goalSupporter);
+			}
+
+			// we only test executable plans and if the goal is a dead end ...
+			if (!gc) return 0;
+
+			
+			for (int n : task.nullary_predicates){
+				int nullaryInInit = capsule.new_variable();
+				lastNullary[n] = nullaryInInit;
+				DEBUG(capsule.registerVariable(nullaryInInit,
+							"nullary#" + to_string(n) + "_" + to_string(-1)));
+
+				if (s.get_nullary_atoms()[n])
+					assertYes(solver,nullaryInInit);
+				else
+					assertNot(solver,nullaryInInit);
+			}
+
+
+		
+			planLength = 0;
+			while (planLength < 100){
+				planLength++;
+				compute_heuristic_sat(s,task,start,solver,capsule,true,false,pastLimit);
+			}
 			planLength++;
-			if (compute_heuristic_sat(s,task,start,solver,capsule,false,linearIncrease)){
+			if (compute_heuristic_sat(s,task,start,solver,capsule,false,false,pastLimit)){
 				ipasir_release(solver);
 				cout << "\t\tPlan of length: " << planLength << endl;
 				DEBUG(cout << "\t\tPlan of length: " << planLength << endl);
@@ -1587,10 +1602,95 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 					return planLength + 1;
 				}
 			}
-			//exit(0);
 		}
+
+		///std::clock_t start = std::clock();
+		///void* solver = ipasir_init();
+		///sat_capsule capsule;
+		///reset_number_of_clauses();
+		///int maxPlanLength = 105;
+		///solverTotal = 0;
+
+		///goalSupporterVars.clear();
+		///parameterVars.clear();
+		///actionVars.clear();
+
+		///// the goal must be achieved!
+		///int gc = 0;
+		///for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
+		///	const AtomicGoal & goalAtom = task.goal.goal[goal];
+		///	std::vector<int> goalSupporter;
+		///	
+		///	if (goalAtom.negated) {
+		///		goalSupporterVars.push_back(goalSupporter);
+		///		continue; // TODO don't know what to do ...
+		///	}
+		///	gc++;
+	
+		///	//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
+		///
+		///	for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
+		///		int goalSuppVar = capsule.new_variable();
+		///		goalSupporter.push_back(goalSuppVar);
+		///		DEBUG(capsule.registerVariable(goalSuppVar,
+		///					"goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
+	
+		///	}
+		///	if (atom_not_satisfied(s,goalAtom)) assertNot(solver,goalSupporter[0]);	
+		///	
+		///	atLeastOne(solver,capsule,goalSupporter);
+		///	goalSupporterVars.push_back(goalSupporter);
+		///}
+
+		///// we only test executable plans and if the goal is a dead end ...
+		///if (!gc) return 0;
+
+		///
+		///for (int n : task.nullary_predicates){
+		///	int nullaryInInit = capsule.new_variable();
+		///	lastNullary[n] = nullaryInInit;
+		///	DEBUG(capsule.registerVariable(nullaryInInit,
+		///				"nullary#" + to_string(n) + "_" + to_string(-1)));
+
+		///	if (s.get_nullary_atoms()[n])
+		///		assertYes(solver,nullaryInInit);
+		///	else
+		///		assertNot(solver,nullaryInInit);
+		///}
+
+
+		///// start the incremental search for a plan	
+		///planLength = 0;
+		///bool linearIncrease = true;
+		///for (int i = 0; i < 500; i++){
+		///	if (!linearIncrease)
+		///		while (planLength < (1 << i)-1){
+		///			planLength++;
+		///			compute_heuristic_sat(s,task,start,solver,capsule,true,false);
+		///		}
+		///	
+		///	planLength++;
+		///	if (compute_heuristic_sat(s,task,start,solver,capsule,false,linearIncrease)){
+		///		ipasir_release(solver);
+		///		cout << "\t\tPlan of length: " << planLength << endl;
+		///		DEBUG(cout << "\t\tPlan of length: " << planLength << endl);
+		///		exit(0);
+		///		return planLength;
+		///	} else {
+		///		cout << "\t\tNo plan of length: " << planLength << endl;
+		///		DEBUG(cout << "\t\tNo plan of length: " << planLength << endl);
+		///		std::clock_t end = std::clock();
+		///		double time_in_ms = 1000.0 * (end-start) / CLOCKS_PER_SEC;
+		///		//cout << "Total time: " << fixed << time_in_ms << "ms" << endl;
+		///		if (time_in_ms > 300000000){
+		///			ipasir_release(solver);
+		///			return planLength + 1;
+		///		}
+		///	}
+		///	//exit(0);
+		///}
 		exit(0);
-		ipasir_release(solver);
+		//ipasir_release(solver);
 		return 501;
 	}
 
