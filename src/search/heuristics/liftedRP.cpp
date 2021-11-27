@@ -772,14 +772,14 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			DEBUG(cout << "NAP A " << paramterThis << endl);
     		vector<vector<int>> equalVarsP;
 			// fill with empty entries
-			//for (int pTime = 0; pTime < startTime; pTime++){
-    		//	vector<int> equalVarsB;
-			//	equalVarsP.push_back(equalVarsB);
-			//}
+			for (int pTime = 0; pTime < startTime; pTime++){
+    			vector<int> equalVarsB;
+				equalVarsP.push_back(equalVarsB);
+			}
 
 
-			//for (int pTime = startTime; pTime < time; pTime++){
-			for (int pTime = 0; pTime < time; pTime++){
+			for (int pTime = startTime; pTime < time; pTime++){
+			//for (int pTime = 0; pTime < time; pTime++){
     			vector<int> equalVarsB;
 				for (int paramterBefore = 0; paramterBefore < numberOfArgumentPositions; paramterBefore++){
 					DEBUG(cout << paramterThis << " = " << paramterBefore << " @ " << pTime); 
@@ -1116,30 +1116,35 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 					}
 
 
-					DEBUG(cout << "\t\tinit support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
-					vector<int> suppOptions;
-					for (size_t i = 0; i < supportingTuples.size(); i++){
-						int suppVar = capsule.new_variable();
-						suppOptions.push_back(suppVar);
-						DEBUG(capsule.registerVariable(suppVar, "initAchiever@" + to_string(time) + "#" + to_string(action) + "-" + to_string(-1) + "_" + to_string(i)));
-					}
-					// one supporter must be chosen
-					impliesOr(solver,actionVar,precSupporter[prec][0],suppOptions);
+					// no support from init allowed ...
+					if (startTime != 0){
+						assertNot(solver,precSupporter[prec][0]);
+					} else {
+						DEBUG(cout << "\t\tinit support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
+						vector<int> suppOptions;
+						for (size_t i = 0; i < supportingTuples.size(); i++){
+							int suppVar = capsule.new_variable();
+							suppOptions.push_back(suppVar);
+							DEBUG(capsule.registerVariable(suppVar, "initAchiever@" + to_string(time) + "#" + to_string(action) + "-" + to_string(-1) + "_" + to_string(i)));
+						}
+						// one supporter must be chosen
+						impliesOr(solver,actionVar,precSupporter[prec][0],suppOptions);
 
-					for (size_t i = 0; i < supportingTuples.size(); i++){
-						vector<int> tuple = supportingTuples[i].first;
+						for (size_t i = 0; i < supportingTuples.size(); i++){
+							vector<int> tuple = supportingTuples[i].first;
 
-						for (size_t j = 0; j < tuple.size(); j++){
-							int myObjIndex = objToIndex[tuple[j]];
-							if (precObjec.arguments[j].constant){
-								if (precObjec.arguments[j].index != tuple[j])
-									assertNot(solver,suppOptions[i]);
-							} else {
-								int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
-								if (myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]])
-									assertNot(solver,suppOptions[i]);
-								else
-									implies(solver,suppOptions[i], parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+							for (size_t j = 0; j < tuple.size(); j++){
+								int myObjIndex = objToIndex[tuple[j]];
+								if (precObjec.arguments[j].constant){
+									if (precObjec.arguments[j].index != tuple[j])
+										assertNot(solver,suppOptions[i]);
+								} else {
+									int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+									if (myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]])
+										assertNot(solver,suppOptions[i]);
+									else
+										implies(solver,suppOptions[i], parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+								}
 							}
 						}
 					}
@@ -1246,7 +1251,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 
 				// no deleter in between
-				for (int deleterTime = 0; deleterTime < planLength - 1; deleterTime++){
+				for (int deleterTime = startTime; deleterTime < planLength - 1; deleterTime++){
 					for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
 						Achiever* deleter = myAchievers->destroyers[del];
 
