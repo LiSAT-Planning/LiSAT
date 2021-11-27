@@ -1246,7 +1246,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 
 				// no deleter in between
-				for (int deleterTime = startTime; deleterTime < planLength - 1; deleterTime++){
+				for (int deleterTime = 0; deleterTime < planLength - 1; deleterTime++){
 					for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
 						Achiever* deleter = myAchievers->destroyers[del];
 
