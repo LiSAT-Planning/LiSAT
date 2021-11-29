@@ -18,6 +18,9 @@ int numberOfArgumentPositions = 0;
 map<int,int> firstArgumentOfType;
 map<int,int> typeOfArgument;
 
+vector<vector<vector<pair<vector<int>,int>>>> supportingTuples; // action -> precondition
+vector<vector<vector<pair<vector<int>,int>>>> deletedTuples; // action -> precondition
+
 
 liftedRP::liftedRP(const Task task) {
     numActions = task.actions.size();
@@ -551,6 +554,129 @@ liftedRP::liftedRP(const Task task) {
         }
     }
 	);
+
+
+	supportingTuples.resize(task.actions.size());
+	deletedTuples.resize(task.actions.size());
+	for (size_t action = 0; action < task.actions.size(); action++){
+        const auto precs = task.actions[action].get_precondition();
+		
+		supportingTuples[action].resize(precs.size());
+        for (size_t prec = 0; prec < precs.size(); prec++) {
+        	DEBUG(cout << "\t\tprecondition #" << prec << endl);
+        	
+			const auto & precObjec = precs[prec];
+			int predicate = precObjec.predicate_symbol;
+			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
+			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue;
+
+
+			vector<pair<vector<int>,int>> & mySupportingTuples = supportingTuples[action][prec];
+
+			// TODO: sind die nicht nach den predikaten sortiert????
+			for (size_t i = 0; i < task.get_static_info().get_relations().size(); i++) {
+			    auto rel = task.get_static_info().get_relations()[i];
+			    auto tuple = task.get_static_info().get_tuples_of_relation(i);
+
+				if (predicate != rel.predicate_symbol) continue;
+				
+				// this is the correct predicate
+			    for (vector<int> groundA: tuple) {
+					bool notApplicable = false;
+					for (size_t j = 0; j < groundA.size(); j++){
+						int myObjIndex = objToIndex[groundA[j]];
+						if (precObjec.arguments[j].constant){
+							if (precObjec.arguments[j].index != groundA[j])
+								notApplicable = true;
+						} else {
+							int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+							if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
+									myObjIndex > upperTindex[typeOfArgument[myParam]])
+								notApplicable = true;
+						}
+					}
+			    	
+					if (notApplicable) continue;
+					mySupportingTuples.push_back({groundA,-1}); // static ..
+				}
+			}
+
+			int currentStartingPos = 0;
+			for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
+			    auto rel = task.initial_state.get_relations()[i];
+			    auto tuple = task.initial_state.get_tuples_of_relation(i);
+				
+				if (predicate != rel.predicate_symbol) {
+					currentStartingPos += tuple.size();
+					continue;
+				}
+			    
+				for (vector<int> groundA: tuple) {
+					bool notApplicable = false;
+					for (size_t j = 0; j < groundA.size(); j++){
+						int myObjIndex = objToIndex[groundA[j]];
+						if (precObjec.arguments[j].constant){
+							if (precObjec.arguments[j].index != groundA[j])
+								notApplicable = true;
+						} else {
+							int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+							if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
+									myObjIndex > upperTindex[typeOfArgument[myParam]])
+								notApplicable = true;
+						}
+					}
+			    	
+					if (notApplicable) {
+						currentStartingPos++;
+						continue;
+					}
+			    	mySupportingTuples.push_back({groundA,currentStartingPos++});
+			    }
+			}
+		}
+
+		deletedTuples[action].resize(task.actions[action].get_effects().size());
+        for (tSize ie = 0; ie < task.actions[action].get_effects().size(); ie++) {
+            auto eff = task.actions[action].get_effects()[ie];
+			if (!eff.negated) continue; // only negative effects can delete init facts
+			int predicate = eff.predicate_symbol;
+
+			//// gather the possibly deleted facts
+			int currentStartingPos = 0;
+			for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
+			    auto rel = task.initial_state.get_relations()[i];
+			    auto tuple = task.initial_state.get_tuples_of_relation(i);
+				
+				if (predicate != rel.predicate_symbol) {
+					currentStartingPos += tuple.size();
+					continue;
+				}
+			
+				vector<pair<vector<int>,int>> & possiblyDeletedTuples = deletedTuples[action][ie];
+				for (vector<int> groundA: tuple) {
+					bool notApplicable = false;
+					for (size_t j = 0; j < groundA.size(); j++){
+						int myObjIndex = objToIndex[groundA[j]];
+						if (eff.arguments[j].constant){
+							if (eff.arguments[j].index != groundA[j])
+								notApplicable = true;
+						} else {
+							int myParam = actionArgumentPositions[action][eff.arguments[j].index];
+							if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
+									myObjIndex > upperTindex[typeOfArgument[myParam]])
+								notApplicable = true;
+						}
+					}
+			    	
+					if (notApplicable) {
+						currentStartingPos++;
+						continue;
+					}
+			    	possiblyDeletedTuples.push_back({groundA,currentStartingPos++});
+			    }
+			}
+		}
+	}
 }
 
 
@@ -595,9 +721,11 @@ double solverTotal;
 
 int actionTyping = 0;
 int atMostOneParamterValue = 0;
+int variableInitMaintenance = 0; 
 int precSupport = 0;
 int equals = 0;
 int initSupp = 0;
+int staticInitSupp = 0;
 int nullary = 0;
 int equalsPrecs = 0; 
 int achieverImplications = 0; 
@@ -697,7 +825,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	int bef = get_number_of_clauses();
 	// indices: timestep -> parameter -> object
 	for (int time = planLength-1; time < planLength; time++){
-		DEBUG(cout << "Generating time = " << time << endl);
+		cout << "Generating time = " << time << " past limit = " << pastLimit << endl;
 
 		// generate nullary variables
 		std::unordered_map<int,int> currentNullary;
@@ -723,8 +851,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			}
 		}
 		initNotTrueAfter.push_back(initNotTrueAfterThis);
-
-
+		bef = get_number_of_clauses();
+		variableInitMaintenance += get_number_of_clauses() - bef;
 
 		std::vector<std::vector<int>> parameterVarsTime(numberOfArgumentPositions);
     	for (int paramter = 0; paramter < numberOfArgumentPositions; paramter++){
@@ -740,6 +868,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				DEBUG(capsule.registerVariable(objectVar, "const@" + to_string(time) + "#" + to_string(paramter) + "-" + task.objects[indexToObj[o + lower]].getName()));
 			}
 			// each parameter can have at most one value
+			int a = get_number_of_clauses();
 			atMostOne(solver,capsule,parameterVarsTime[paramter]);
 		}
 		parameterVars.push_back(parameterVarsTime);
@@ -985,75 +1114,11 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				impliesOr(solver,actionVar,precSupporter[prec]);
 			
 				// 2. Step: Supporter of type 1: initial state
-				vector<pair<vector<int>,int>> supportingTuples;
-
-				// TODO: sind die nicht nach den predikaten sortiert????
-    			for (size_t i = 0; i < task.get_static_info().get_relations().size(); i++) {
-    			    auto rel = task.get_static_info().get_relations()[i];
-    			    auto tuple = task.get_static_info().get_tuples_of_relation(i);
-
-					if (predicate != rel.predicate_symbol) continue;
-					
-					// this is the correct predicate
-    			    for (vector<int> groundA: tuple) {
-						bool notApplicable = false;
-						for (size_t j = 0; j < groundA.size(); j++){
-							int myObjIndex = objToIndex[groundA[j]];
-							if (precObjec.arguments[j].constant){
-								if (precObjec.arguments[j].index != groundA[j])
-									notApplicable = true;
-							} else {
-								int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
-								if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
-										myObjIndex > upperTindex[typeOfArgument[myParam]])
-									notApplicable = true;
-							}
-						}
-    			    	
-						if (notApplicable) continue;
-						supportingTuples.push_back({groundA,-1}); // static ..
-					}
-    			}
-
-				int currentStartingPos = 0;
-    			for (tSize i = 0; i < s.get_relations().size(); i++) {
-    			    auto rel = s.get_relations()[i];
-    			    auto tuple = s.get_tuples_of_relation(i);
-					
-					if (predicate != rel.predicate_symbol) {
-						currentStartingPos += tuple.size();
-						continue;
-					}
-    			    
-					for (vector<int> groundA: tuple) {
-   						bool notApplicable = false;
-						for (size_t j = 0; j < groundA.size(); j++){
-							int myObjIndex = objToIndex[groundA[j]];
-							if (precObjec.arguments[j].constant){
-								if (precObjec.arguments[j].index != groundA[j])
-									notApplicable = true;
-							} else {
-								int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
-								if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
-										myObjIndex > upperTindex[typeOfArgument[myParam]])
-									notApplicable = true;
-							}
-						}
-    			    	
-						if (notApplicable) {
-							currentStartingPos++;
-							continue;
-						}
- 				    	supportingTuples.push_back({groundA,currentStartingPos++});
-    			    }
-    			}
-				
-				
 				// achiever structure contains both achievers and deleters
 				ActionPrecAchiever* myAchievers = achievers[action]->precAchievers[prec];
 
 				bef = get_number_of_clauses();
-				if (supportingTuples.size() == 0){
+				if (supportingTuples[action][prec].size() == 0){
 					DEBUG(cout << "\t\tno init support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 					impliesNot(solver,actionVar,precSupporter[prec][0]); // cannot be supported by init!
 				} else {
@@ -1061,9 +1126,9 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						//cout << task.predicates[predicate].getName() << endl;
 						//cout << supportingTuples.size() << " " << precObjec.arguments.size() << endl;
 
-						if (supportingTuples.size() == 1){
+						if (supportingTuples[action][prec].size() == 1){
 							// if this action is chosen, exactly this tuple has to be used as the precondition
-							vector<int> tuple = supportingTuples[0].first;
+							vector<int> tuple = supportingTuples[action][prec][0].first;
 							for (size_t j = 0; j < tuple.size(); j++){
 								int myObjIndex = objToIndex[tuple[j]];
 								if (precObjec.arguments[j].constant){
@@ -1081,8 +1146,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							if (precObjec.arguments.size() == 1){
 								vector<int> possibleValues;
 								
-								for (size_t i = 0; i < supportingTuples.size(); i++){
-									vector<int> tuple = supportingTuples[i].first;
+								for (size_t i = 0; i < supportingTuples[action][prec].size(); i++){
+									vector<int> tuple = supportingTuples[action][prec][i].first;
 								
 									int myObjIndex = objToIndex[tuple[0]];
 									int myParam = actionArgumentPositions[action][precObjec.arguments[0].index];
@@ -1097,9 +1162,9 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 									map<vector<int>,set<int>> possibleUpto;
 	
 									// build assignment tuple up to this point
-									for (size_t i = 0; i < supportingTuples.size(); i++){
+									for (size_t i = 0; i < supportingTuples[action][prec].size(); i++){
 										//cout << "Tuple " << i << endl;
-										vector<int> tuple = supportingTuples[i].first;
+										vector<int> tuple = supportingTuples[action][prec][i].first;
 										vector<int> subTuple;
 										subTuple.push_back(actionVar);
 										for (size_t j = 0; j <= lastPos; j++){
@@ -1136,11 +1201,13 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								}
 							}
 						}
+						staticInitSupp += get_number_of_clauses() - bef;
+						bef = get_number_of_clauses();
 					} else {
 						//////// NON static predicate
 						DEBUG(cout << "\t\tinit support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 						vector<int> suppOptions;
-						for (size_t i = 0; i < supportingTuples.size(); i++){
+						for (size_t i = 0; i < supportingTuples[action][prec].size(); i++){
 							int suppVar = capsule.new_variable();
 							suppOptions.push_back(suppVar);
 							DEBUG(capsule.registerVariable(suppVar, "initAchiever@" + to_string(time) + "#" + to_string(action) + "-" + to_string(-1) + "_" + to_string(i)));
@@ -1148,11 +1215,11 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						// one supporter must be chosen
 						impliesOr(solver,actionVar,precSupporter[prec][0],suppOptions);
 
-						for (size_t i = 0; i < supportingTuples.size(); i++){
-							vector<int> tuple = supportingTuples[i].first;
+						for (size_t i = 0; i < supportingTuples[action][prec].size(); i++){
+							vector<int> tuple = supportingTuples[action][prec][i].first;
 							// for time = 0, init will still be as given. Thereafter, we have to know that init has not been made false yet.
 							if (time){
-								impliesNot(solver,suppOptions[i],initNotTrueAfter[time-1][supportingTuples[i].second]);
+								impliesNot(solver,suppOptions[i],initNotTrueAfter[time-1][supportingTuples[action][prec][i].second]);
 								//cout << "GEN " << action << " " << i << " " << supportingTuples[i].second << " " << initNotTrueAfter[time-1][supportingTuples[i].second] << 
 								//	" " << capsule.variableNames[initNotTrueAfter[time-1][supportingTuples[i].second]] << endl;
 							}
@@ -1171,10 +1238,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								}
 							}
 						}
+						initSupp += get_number_of_clauses() - bef;
+						bef = get_number_of_clauses();
 					}
 				}
-				initSupp += get_number_of_clauses() - bef;
-				bef = get_number_of_clauses();
 				
 				
 				//////// 3. Step: Supporter of type 2: other actions
@@ -1347,57 +1414,21 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				if (!eff.negated) continue; // only negative effects can delete init facts
 				int predicate = eff.predicate_symbol;
 
-				//// gather the possibly deleted facts
-   				int currentStartingPos = 0;
-    			for (tSize i = 0; i < s.get_relations().size(); i++) {
-    			    auto rel = s.get_relations()[i];
-    			    auto tuple = s.get_tuples_of_relation(i);
-					
-					if (predicate != rel.predicate_symbol) {
-						currentStartingPos += tuple.size();
-						continue;
+				for (size_t i = 0; i < deletedTuples[action][ie].size(); i++){
+					vector<int> tuple = deletedTuples[action][ie][i].first;
+
+					set<int> neededVariables;
+					neededVariables.insert(actionVar);
+					for (size_t j = 0; j < tuple.size(); j++){
+						int myObjIndex = objToIndex[tuple[j]];
+						if (!eff.arguments[j].constant){
+							int myParam = actionArgumentPositions[action][eff.arguments[j].index];
+							if (!(myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]]))
+								neededVariables.insert(parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+						}
 					}
-				
-					vector<pair<vector<int>,int>> possiblyDeletedTuples;
-					for (vector<int> groundA: tuple) {
-   						bool notApplicable = false;
-						for (size_t j = 0; j < groundA.size(); j++){
-							int myObjIndex = objToIndex[groundA[j]];
-							if (eff.arguments[j].constant){
-								if (eff.arguments[j].index != groundA[j])
-									notApplicable = true;
-							} else {
-								int myParam = actionArgumentPositions[action][eff.arguments[j].index];
-								if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
-										myObjIndex > upperTindex[typeOfArgument[myParam]])
-									notApplicable = true;
-							}
-						}
-    			    	
-						if (notApplicable) {
-							currentStartingPos++;
-							continue;
-						}
- 				    	possiblyDeletedTuples.push_back({groundA,currentStartingPos++});
-    			    }
-
-
-					for (size_t i = 0; i < possiblyDeletedTuples.size(); i++){
-						vector<int> tuple = possiblyDeletedTuples[i].first;
-
-						set<int> neededVariables;
-						neededVariables.insert(actionVar);
-						for (size_t j = 0; j < tuple.size(); j++){
-							int myObjIndex = objToIndex[tuple[j]];
-							if (!eff.arguments[j].constant){
-								int myParam = actionArgumentPositions[action][eff.arguments[j].index];
-								if (!(myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]]))
-									neededVariables.insert(parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
-							}
-						}
-						andImplies(solver,neededVariables,initNotTrueAfter[time][possiblyDeletedTuples[i].second]);
-					}
-    			}
+					andImplies(solver,neededVariables,initNotTrueAfter[time][deletedTuples[action][ie][i].second]);
+				}
 			}
 
 			noDeleter += get_number_of_clauses() - bef;
@@ -1535,6 +1566,25 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	goalDeleter += get_number_of_clauses() - bef;
 	bef = get_number_of_clauses();
 
+
+
+	cout << "Generated Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
+	cout << "\tone action         " << setw(9) << oneAction << endl; 
+	cout << "\tmax 1 param value  " << setw(9) << atMostOneParamterValue << endl;
+	cout << "\tinit maintain      " << setw(9) << variableInitMaintenance << endl;
+	cout << "\tprec support       " << setw(9) << precSupport << endl;
+	cout << "\tequals             " << setw(9) << equals << endl;
+	cout << "\tinit support       " << setw(9) << initSupp << endl;
+	cout << "\tstatic init support" << setw(9) << initSupp << endl;
+	cout << "\ttyping             " << setw(9) << actionTyping << endl;
+	cout << "\tequals precs       " << setw(9) << equalsPrecs << endl; 
+	cout << "\tachiever           " << setw(9) << achieverImplications << endl; 
+	cout << "\tno deleter         " << setw(9) << noDeleter << endl; 
+	cout << "\tgoal achievers     " << setw(9) << goalAchiever << endl; 
+	cout << "\tgoal deleters      " << setw(9) << goalDeleter << endl; 
+	cout << "\tnullary            " << setw(9) << nullary << endl;
+
+
 	if (onlyGenerate) return false;
 		
 	DEBUG(capsule.printVariables());
@@ -1550,18 +1600,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	std::clock_t end = std::clock();
 	double time_in_ms = 1000.0 * (end-startTime) / CLOCKS_PER_SEC;
 	cout << "Overall time: " << fixed << time_in_ms << "ms of that Solver: " << solverTotal << "ms   Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
-	cout << "\tone action       " << setw(9) << oneAction << endl; 
-	cout << "\tmax 1 param value" << setw(9) << atMostOneParamterValue << endl;
-	cout << "\tprec support     " << setw(9) << precSupport << endl;
-	cout << "\tequals           " << setw(9) << equals << endl;
-	cout << "\tinit support     " << setw(9) << initSupp << endl;
-	cout << "\ttyping           " << setw(9) << actionTyping << endl;
-	cout << "\tequals precs     " << setw(9) << equalsPrecs << endl; 
-	cout << "\tachiever         " << setw(9) << achieverImplications << endl; 
-	cout << "\tno deleter       " << setw(9) << noDeleter << endl; 
-	cout << "\tgoal achievers   " << setw(9) << goalAchiever << endl; 
-	cout << "\tgoal deleters    " << setw(9) << goalDeleter << endl; 
-	cout << "\tnullary          " << setw(9) << nullary << endl;
 
 
 	DEBUG(cout << "Solver State: " << state << endl);
@@ -1615,16 +1653,36 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 	if (satMode){
+		int maxLen = 100;
+
+
 		DEBUG(cout << "Parameter arity " << maxArity << " Objects " << task.objects.size() << endl);
 		// start the incremental search for a plan	
-		for (int pastLimit = 1; pastLimit < 205; pastLimit++){
+		for (int pastLimit = 1; pastLimit < maxLen + 1; pastLimit++){
+			// reset formula size counters
+			actionTyping = 0;
+			atMostOneParamterValue = 0;
+			variableInitMaintenance = 0;
+			precSupport = 0;
+			equals = 0;
+			initSupp = 0;
+			nullary = 0;
+			equalsPrecs = 0; 
+			achieverImplications = 0; 
+			noDeleter = 0; 
+			oneAction = 0; 
+			goalAchiever = 0; 
+			goalDeleter = 0; 
+
+	
+			
 			cout << "Past Limit " << pastLimit << endl;
 		
 			std::clock_t start = std::clock();
 			void* solver = ipasir_init();
 			sat_capsule capsule;
 			reset_number_of_clauses();
-			int maxPlanLength = 205;
+			int maxPlanLength = maxLen + 2;
 			solverTotal = 0;
 
 			goalSupporterVars.clear();
@@ -1677,7 +1735,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 
 		
 			planLength = 0;
-			while (planLength < 200){
+			while (planLength < maxLen){
 				planLength++;
 				compute_heuristic_sat(s,task,start,solver,capsule,true,false,pastLimit);
 			}
@@ -1699,6 +1757,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 					return planLength + 1;
 				}
 			}
+			ipasir_release(solver);
 		}
 
 		///std::clock_t start = std::clock();
