@@ -588,6 +588,8 @@ vector<vector<int>> goalSupporterVars;
 std::vector<std::vector<std::vector<int>>> parameterVars;
 std::vector<std::vector<int>> actionVars;
 std::unordered_map<int,int> lastNullary;
+std::vector<std::vector<int>> initNotTrueAfter;
+
 double solverTotal;
 
 
@@ -705,7 +707,25 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			DEBUG(capsule.registerVariable(nullVar,	"nullary#" + to_string(n) + "_" + to_string(time)));
 		}
 
-		//cout << "O " << task.objects.size() << " A " << maxArity << endl;
+
+		std::vector<int> initNotTrueAfterThis;
+		for (tSize i = 0; i < s.get_relations().size(); i++) {
+		    auto rel = s.get_relations()[i];
+		    auto tuple = s.get_tuples_of_relation(i);
+			
+			for (size_t j = 0; j < tuple.size(); j++){
+				int initAtom = capsule.new_variable();
+				DEBUG(capsule.registerVariable(initAtom, "initAtomFalseAfter@" + to_string(time) + "#" + to_string(i) + "-" + to_string(j)));
+				// if init atom as false after previous step, it is false now!
+				if (initNotTrueAfter.size())
+					implies(solver,initNotTrueAfter.back()[initNotTrueAfterThis.size()],initAtom);
+				initNotTrueAfterThis.push_back(initAtom);
+			}
+		}
+		initNotTrueAfter.push_back(initNotTrueAfterThis);
+
+
+
 		std::vector<std::vector<int>> parameterVarsTime(numberOfArgumentPositions);
     	for (int paramter = 0; paramter < numberOfArgumentPositions; paramter++){
 			int type = typeOfArgument[paramter];
@@ -714,7 +734,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			
 			parameterVarsTime[paramter].resize(upper - lower + 1);
 
-			for (size_t o = 0; o < upper - lower + 1; o++){
+			for (int o = 0; o < upper - lower + 1; o++){
 				int objectVar = capsule.new_variable();
 				parameterVarsTime[paramter][o] = objectVar;
 				DEBUG(capsule.registerVariable(objectVar, "const@" + to_string(time) + "#" + to_string(paramter) + "-" + task.objects[indexToObj[o + lower]].getName()));
@@ -926,7 +946,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						} else {
 							varA = actionArgumentPositions[action][varA];
 							varB = actionArgumentPositions[action][varB];
-							for(size_t o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
+							for(int o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
 									o <= min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
 								andImpliesNot(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
 										parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]]);
@@ -945,7 +965,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						} else {
 							varA = actionArgumentPositions[action][varA];
 							varB = actionArgumentPositions[action][varB];
-							for(size_t o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
+							for(int o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
 									o <= min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
 								andImplies(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
 										parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]]);
@@ -965,7 +985,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				impliesOr(solver,actionVar,precSupporter[prec]);
 			
 				// 2. Step: Supporter of type 1: initial state
-				vector<pair<vector<int>,bool>> supportingTuples;
+				vector<pair<vector<int>,int>> supportingTuples;
 
 				// TODO: sind die nicht nach den predikaten sortiert????
     			for (size_t i = 0; i < task.get_static_info().get_relations().size(); i++) {
@@ -991,15 +1011,19 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						}
     			    	
 						if (notApplicable) continue;
-						supportingTuples.push_back({groundA,true});
+						supportingTuples.push_back({groundA,-1}); // static ..
 					}
     			}
 
+				int currentStartingPos = 0;
     			for (tSize i = 0; i < s.get_relations().size(); i++) {
     			    auto rel = s.get_relations()[i];
     			    auto tuple = s.get_tuples_of_relation(i);
 					
-					if (predicate != rel.predicate_symbol) continue;
+					if (predicate != rel.predicate_symbol) {
+						currentStartingPos += tuple.size();
+						continue;
+					}
     			    
 					for (vector<int> groundA: tuple) {
    						bool notApplicable = false;
@@ -1016,8 +1040,11 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							}
 						}
     			    	
-						if (notApplicable) continue;
- 				    	supportingTuples.push_back({groundA,false});
+						if (notApplicable) {
+							currentStartingPos++;
+							continue;
+						}
+ 				    	supportingTuples.push_back({groundA,currentStartingPos++});
     			    }
     			}
 				
@@ -1065,8 +1092,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								}
 								impliesOr(solver,actionVar,possibleValues);
 							} else {
-	
-								for (int lastPos = 0; lastPos < precObjec.arguments.size() - 1 ; lastPos++){
+								for (size_t lastPos = 0; lastPos < precObjec.arguments.size() - 1 ; lastPos++){
 									//cout << "Last Pos " << lastPos << endl;
 									map<vector<int>,set<int>> possibleUpto;
 	
@@ -1083,8 +1109,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 											
 											subTuple.push_back(constantVar);
 										}
-	
-	
+
 										int myObjIndex = objToIndex[tuple[lastPos + 1]];
 										int myParam = actionArgumentPositions[action][precObjec.arguments[lastPos + 1].index];
 										int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
@@ -1111,15 +1136,8 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								}
 							}
 						}
-						
-						continue;
-					}
-
-
-					// no support from init allowed ...
-					if (startTime != 0){
-						assertNot(solver,precSupporter[prec][0]);
 					} else {
+						//////// NON static predicate
 						DEBUG(cout << "\t\tinit support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 						vector<int> suppOptions;
 						for (size_t i = 0; i < supportingTuples.size(); i++){
@@ -1132,6 +1150,9 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 						for (size_t i = 0; i < supportingTuples.size(); i++){
 							vector<int> tuple = supportingTuples[i].first;
+							// for time = 0, init will still be as given. Thereafter, we have to know that init has not been made false yet.
+							if (time)
+								impliesNot(solver,suppOptions[i],initNotTrueAfter[time-1][supportingTuples[i].second]);
 
 							for (size_t j = 0; j < tuple.size(); j++){
 								int myObjIndex = objToIndex[tuple[j]];
@@ -1314,6 +1335,71 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				noDeleter += get_number_of_clauses() - bef;
 				bef = get_number_of_clauses();
 			}
+		
+
+			// this action might delete facts from init ...
+        	auto thisAction = task.actions[action];
+            for (tSize ie = 0; ie < thisAction.get_effects().size(); ie++) {
+                auto eff = thisAction.get_effects()[ie];
+				if (!eff.negated) continue; // only negative effects can delete init facts
+				int predicate = eff.predicate_symbol;
+
+				//// gather the possibly deleted facts
+   				int currentStartingPos = 0;
+    			for (tSize i = 0; i < s.get_relations().size(); i++) {
+    			    auto rel = s.get_relations()[i];
+    			    auto tuple = s.get_tuples_of_relation(i);
+					
+					if (predicate != rel.predicate_symbol) {
+						currentStartingPos += tuple.size();
+						continue;
+					}
+				
+					vector<pair<vector<int>,int>> possiblyDeletedTuples;
+					for (vector<int> groundA: tuple) {
+   						bool notApplicable = false;
+						for (size_t j = 0; j < groundA.size(); j++){
+							int myObjIndex = objToIndex[groundA[j]];
+							if (eff.arguments[j].constant){
+								if (eff.arguments[j].index != groundA[j])
+									notApplicable = true;
+							} else {
+								int myParam = actionArgumentPositions[action][eff.arguments[j].index];
+								if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
+										myObjIndex > upperTindex[typeOfArgument[myParam]])
+									notApplicable = true;
+							}
+						}
+    			    	
+						if (notApplicable) {
+							currentStartingPos++;
+							continue;
+						}
+ 				    	possiblyDeletedTuples.push_back({groundA,currentStartingPos++});
+    			    }
+
+
+					for (size_t i = 0; i < possiblyDeletedTuples.size(); i++){
+						vector<int> tuple = possiblyDeletedTuples[i].first;
+
+						set<int> neededVariables;
+						neededVariables.insert(actionVar);
+						neededVariables.insert(initNotTrueAfter[time][possiblyDeletedTuples[i].second]);
+						for (size_t j = 0; j < tuple.size(); j++){
+							int myObjIndex = objToIndex[tuple[j]];
+							if (!eff.arguments[j].constant){
+								int myParam = actionArgumentPositions[action][eff.arguments[j].index];
+								if (!(myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]]))
+									neededVariables.insert(parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+							}
+						}
+						notAll(solver,neededVariables);
+					}
+    			}
+			}
+
+			noDeleter += get_number_of_clauses() - bef;
+			bef = get_number_of_clauses();
 		}
 		//exit(0);
 
@@ -1342,6 +1428,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	
 		lastNullary = currentNullary;
 	}
+
+
+
+
 
 	bef = get_number_of_clauses();
 	// nullary goal
@@ -1498,7 +1588,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
             	for (size_t l = 0; l < params.size(); l++) {
 					int p = actionArgumentPositions[action][l];
 					cout << " " << l << ":";
-					for (size_t o = 0; o <= upperTindex[typeOfArgument[p]] - lowerTindex[typeOfArgument[p]]; o++){
+					for (int o = 0; o <= upperTindex[typeOfArgument[p]] - lowerTindex[typeOfArgument[p]]; o++){
 						if (ipasir_val(solver,parameterVars[time][p][o]) > 0){
 							cout << " " << task.objects[indexToObj[o + lowerTindex[typeOfArgument[p]]]].getName();
 							arguments.push_back(indexToObj[o + lowerTindex[typeOfArgument[p]]]);
@@ -1556,8 +1646,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 				for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
 					int goalSuppVar = capsule.new_variable();
 					goalSupporter.push_back(goalSuppVar);
-					DEBUG(capsule.registerVariable(goalSuppVar,
-								"goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
+					DEBUG(capsule.registerVariable(goalSuppVar, "goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
 	
 				}
 				if (atom_not_satisfied(s,goalAtom)) assertNot(solver,goalSupporter[0]);	
