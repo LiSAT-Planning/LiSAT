@@ -779,7 +779,12 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								int lower = max(lowerTindex[myType],lowerTindex[theirType]);
 				                int upper = min(upperTindex[myType],upperTindex[theirType]);
 								//cout << myParam << " " << theirParam << " " << upper - lower + 1 << endl;
-							
+			
+								if (lowerTindex[myType] != lowerTindex[theirType] || upperTindex[myType] != upperTindex[theirType]){
+									cout << "type clash in achiever" << endl;
+									exit(0);
+								}
+
                 				for (int m = lower; m <= upper; m++)
 									equalsPairs[{actionArgumentPositions[action][myParam],actionArgumentPositions[achiever->action][theirParam]}].insert(m);
 							}
@@ -1153,46 +1158,72 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							}
 							impliesOr(solver,actionVar,possibleValues);
 						} else {
+							bool firstWithNonConst = true;
 							for (size_t lastPos = 0; lastPos < precObjec.arguments.size() - 1 ; lastPos++){
-								//cout << "Last Pos " << lastPos << endl;
+								// ignore all arguments until we find the first one with a non-constant
+								if (precObjec.arguments[lastPos].constant && firstWithNonConst) continue;
+
 								map<vector<int>,set<int>> possibleUpto;
 	
 								// build assignment tuple up to this point
 								for (size_t i = 0; i < supportingTuples[action][prec].size(); i++){
-									//cout << "Tuple " << i << endl;
 									vector<int> tuple = supportingTuples[action][prec][i].first;
 									vector<int> subTuple;
 									subTuple.push_back(actionVar);
+									if (!task.predicates[predicate].isStaticPredicate())
+										subTuple.push_back(precSupporter[prec][0]);
+								
 									for (size_t j = 0; j <= lastPos; j++){
+										// push only the non-constants
+										if (precObjec.arguments[j].constant) continue;
 										int myObjIndex = objToIndex[tuple[j]];
 										int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
 										int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
 										
 										subTuple.push_back(constantVar);
 									}
+									
+									if (precObjec.arguments[lastPos + 1].constant) {
+										possibleUpto[subTuple].insert(0);
+										continue;
+									}
 
 									int myObjIndex = objToIndex[tuple[lastPos + 1]];
 									int myParam = actionArgumentPositions[action][precObjec.arguments[lastPos + 1].index];
-									int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
+									int localObjectNumber = myObjIndex - lowerTindex[typeOfArgument[myParam]];
+									//if (localObjectNumber >= parameterVars[time][myParam].size()) cout << "F " << localObjectNumber << " " << parameterVars[time][myParam].size() << endl;
+									int constantVar = parameterVars[time][myParam][localObjectNumber];
+
+
 									possibleUpto[subTuple].insert(constantVar);
 								}
-	
-								for (auto & x : possibleUpto){
-									andImpliesOr(solver,x.first,x.second);
-									//for (int i : x.first) cout << " - " << capsule.variableNames[i];
-									//for (int i : x.second) cout << " " << capsule.variableNames[i];
-									//cout << endl;
-								}
-	
-								if (lastPos == 0){
+
+
+								if (!precObjec.arguments[lastPos + 1].constant)
+									for (auto & x : possibleUpto){
+										andImpliesOr(solver,x.first,x.second);
+										//for (int i : x.first) cout << " - " << capsule.variableNames[i];
+										//for (int i : x.second) cout << " " << capsule.variableNames[i];
+										//cout << endl;
+									}
+
+
+								int posOfValue = 1;
+								if (!task.predicates[predicate].isStaticPredicate()) posOfValue = 2;
+
+								if (firstWithNonConst){
 									vector<int> initial;
 									for (auto & x : possibleUpto)
-										initial.push_back(x.first[1]);
+										initial.push_back(x.first[posOfValue]);
 	
-									impliesOr(solver,actionVar,initial);
+									if (task.predicates[predicate].isStaticPredicate())
+										impliesOr(solver,actionVar,initial);
+									else
+										impliesOr(solver,actionVar,precSupporter[prec][0],initial);
 									//cout << "- " << capsule.variableNames[actionVar];
 									//for (int i : initial) cout << " " << capsule.variableNames[i];
 									//cout << endl;
+									firstWithNonConst = false;
 								}
 							}
 						}
@@ -1221,7 +1252,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							}
 							// now they can't all be true *and* we have deleted the init
 							criticalVars.insert(initNotTrueAfter[time-1][supportingTuples[action][prec][i].second]);
-							notAll(solver,criticalVars);
+							//notAll(solver,criticalVars);
 						}
 					}
 					initSupp += get_number_of_clauses() - bef;
