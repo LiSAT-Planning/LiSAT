@@ -1151,8 +1151,11 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						for (size_t i = 0; i < supportingTuples.size(); i++){
 							vector<int> tuple = supportingTuples[i].first;
 							// for time = 0, init will still be as given. Thereafter, we have to know that init has not been made false yet.
-							if (time)
+							if (time){
 								impliesNot(solver,suppOptions[i],initNotTrueAfter[time-1][supportingTuples[i].second]);
+								//cout << "GEN " << action << " " << i << " " << supportingTuples[i].second << " " << initNotTrueAfter[time-1][supportingTuples[i].second] << 
+								//	" " << capsule.variableNames[initNotTrueAfter[time-1][supportingTuples[i].second]] << endl;
+							}
 
 							for (size_t j = 0; j < tuple.size(); j++){
 								int myObjIndex = objToIndex[tuple[j]];
@@ -1626,6 +1629,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 
 			goalSupporterVars.clear();
 			parameterVars.clear();
+			initNotTrueAfter.clear();
 			actionVars.clear();
 
 			// the goal must be achieved!
