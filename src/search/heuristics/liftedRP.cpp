@@ -782,7 +782,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			
 								if (lowerTindex[myType] != lowerTindex[theirType] || upperTindex[myType] != upperTindex[theirType]){
 									cout << "type clash in achiever" << endl;
-									exit(0);
+									//exit(0);
 								}
 
                 				for (int m = lower; m <= upper; m++)
@@ -1252,7 +1252,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 							}
 							// now they can't all be true *and* we have deleted the init
 							criticalVars.insert(initNotTrueAfter[time-1][supportingTuples[action][prec][i].second]);
-							//notAll(solver,criticalVars);
+							notAll(solver,criticalVars);
 						}
 					}
 					initSupp += get_number_of_clauses() - bef;
