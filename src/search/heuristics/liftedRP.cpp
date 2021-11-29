@@ -735,7 +735,7 @@ int goalAchiever = 0;
 int goalDeleter = 0; 
 
 
-bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, int pastLimit) {
+bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, int pastLimit) {
 	//for (size_t action = 0; action < task.actions.size(); action++){
 	//	for (size_t param = 0; param < task.actions[action].get_parameters().size(); param++){
 	//		int myType = task.actions[action].get_parameters()[param].type;
@@ -1470,7 +1470,12 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	// nullary goal
 	int nullaryGoalBlocker = capsule.new_variable();
 	DEBUG(capsule.registerVariable(nullaryGoalBlocker,"nullaryGoalBlocker#" + to_string(planLength)));
-	if (!onlyGenerate) ipasir_assume(solver,nullaryGoalBlocker);
+	if (!onlyGenerate) {
+		if (onlyHardConstraints)
+			assertYes(solver,nullaryGoalBlocker);
+		else
+			ipasir_assume(solver,nullaryGoalBlocker);
+	}
 	
     for (int g : task.goal.positive_nullary_goals)
 		implies(solver,nullaryGoalBlocker,lastNullary[g]);	
@@ -1519,7 +1524,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		
 		if (!onlyGenerate)
 			for (size_t time = planLength + 1; time < goalSupporterVars[goal].size(); time++)
-				ipasir_assume(solver,-goalSupporterVars[goal][time]);
+				if (onlyHardConstraints)
+					assertNot(solver,goalSupporterVars[goal][time]);
+				else
+					ipasir_assume(solver,-goalSupporterVars[goal][time]);
 	}
 	goalAchiever += get_number_of_clauses() - bef;
 	bef = get_number_of_clauses();
@@ -1575,7 +1583,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	cout << "\tprec support       " << setw(9) << precSupport << endl;
 	cout << "\tequals             " << setw(9) << equals << endl;
 	cout << "\tinit support       " << setw(9) << initSupp << endl;
-	cout << "\tstatic init support" << setw(9) << initSupp << endl;
+	cout << "\tstatic init support" << setw(9) << staticInitSupp << endl;
 	cout << "\ttyping             " << setw(9) << actionTyping << endl;
 	cout << "\tequals precs       " << setw(9) << equalsPrecs << endl; 
 	cout << "\tachiever           " << setw(9) << achieverImplications << endl; 
@@ -1737,10 +1745,10 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 			planLength = 0;
 			while (planLength < maxLen){
 				planLength++;
-				compute_heuristic_sat(s,task,start,solver,capsule,true,false,pastLimit);
+				compute_heuristic_sat(s,task,start,solver,capsule,true,false,true,pastLimit);
 			}
 			planLength++;
-			if (compute_heuristic_sat(s,task,start,solver,capsule,false,false,pastLimit)){
+			if (compute_heuristic_sat(s,task,start,solver,capsule,false,false,true,pastLimit)){
 				ipasir_release(solver);
 				cout << "\t\tPlan of length: " << planLength << endl;
 				DEBUG(cout << "\t\tPlan of length: " << planLength << endl);
@@ -1822,11 +1830,11 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 		///	if (!linearIncrease)
 		///		while (planLength < (1 << i)-1){
 		///			planLength++;
-		///			compute_heuristic_sat(s,task,start,solver,capsule,true,false);
+		///			compute_heuristic_sat(s,task,start,solver,capsule,true,false,false);
 		///		}
 		///	
 		///	planLength++;
-		///	if (compute_heuristic_sat(s,task,start,solver,capsule,false,linearIncrease)){
+		///	if (compute_heuristic_sat(s,task,start,solver,capsule,false,linearIncrease,false)){
 		///		ipasir_release(solver);
 		///		cout << "\t\tPlan of length: " << planLength << endl;
 		///		DEBUG(cout << "\t\tPlan of length: " << planLength << endl);

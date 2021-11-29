@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(CPLEX_SOURCE_DIR /home/gregor/Workspace/cplex)
 #set(CPLEX_SOURCE_DIR /home/dh/programme/CPLEX_Studio1210)
+link_directories("/home/gregor/Workspace/kissat/build")
+
 
 ## required for IBM's CPLEX in order to force it to use newer names for the std headers
 add_definitions(-DIL_STD)
@@ -105,6 +107,7 @@ add_executable(search
 		heuristics/liftedRP.cpp heuristics/liftedRP.h
 		heuristics/sat_encoder.cpp heuristics/sat_encoder.h
 		heuristics/ipasir.h
+		heuristics/kissat.h heuristics/kissat.cpp
 		)
 
 add_library(cplex SHARED IMPORTED)
@@ -127,7 +130,8 @@ set_target_properties(concert  PROPERTIES
 
 target_link_options(search PUBLIC ${linker_flags})
 
-target_link_libraries(search PRIVATE ipasircryptominisat5)
+#target_link_libraries(search PRIVATE ipasircryptominisat5)
+target_link_libraries(search PRIVATE kissat)
 
 target_link_libraries(search PRIVATE ilocplex)
 target_link_libraries(search PRIVATE concert)
