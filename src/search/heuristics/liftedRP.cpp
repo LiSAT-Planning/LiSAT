@@ -781,7 +781,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								//cout << myParam << " " << theirParam << " " << upper - lower + 1 << endl;
 			
 								if (lowerTindex[myType] != lowerTindex[theirType] || upperTindex[myType] != upperTindex[theirType]){
-									cout << "type clash in achiever" << endl;
+									//cout << "type clash in achiever" << endl;
 									//exit(0);
 								}
 
@@ -1606,6 +1606,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	bef = get_number_of_clauses();
 
 
+	if (onlyGenerate) return false;
 
 	cout << "Generated Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
 	cout << "\tone action         " << setw(9) << oneAction << endl; 
@@ -1623,8 +1624,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	cout << "\tgoal deleters      " << setw(9) << goalDeleter << endl; 
 	cout << "\tnullary            " << setw(9) << nullary << endl;
 
-
-	if (onlyGenerate) return false;
 		
 	DEBUG(capsule.printVariables());
 
