@@ -1133,14 +1133,25 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						for (size_t j = 0; j < tuple.size(); j++){
 							int myObjIndex = objToIndex[tuple[j]];
 							if (precObjec.arguments[j].constant){
-								if (precObjec.arguments[j].index != tuple[j])
-									assertNot(solver,actionVar);
+								if (precObjec.arguments[j].index != tuple[j]){
+									if (task.predicates[predicate].isStaticPredicate())
+										assertNot(solver,actionVar);
+									else
+										impliesNot(solver,actionVar,precSupporter[prec][0]);
+								}
 							} else {
 								int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
-								if (myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]])
-									assertNot(solver,actionVar);
-								else
-									implies(solver,actionVar, parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+								if (myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]]){
+									if (task.predicates[predicate].isStaticPredicate())
+										assertNot(solver,actionVar);
+									else
+										impliesNot(solver,actionVar,precSupporter[prec][0]);
+								} else {
+									if (task.predicates[predicate].isStaticPredicate())
+										implies(solver,actionVar, parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+									else
+										impliesAnd(solver,actionVar,precSupporter[prec][0], parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+								}
 							}
 						}
 					} else {
@@ -1156,7 +1167,11 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 								
 								possibleValues.push_back(constantVar);
 							}
-							impliesOr(solver,actionVar,possibleValues);
+
+							if (task.predicates[predicate].isStaticPredicate())
+								impliesOr(solver,actionVar,possibleValues);
+							else
+								impliesOr(solver,actionVar,precSupporter[prec][0],possibleValues);
 						} else {
 							bool firstWithNonConst = true;
 							for (size_t lastPos = 0; lastPos < precObjec.arguments.size() - 1 ; lastPos++){
