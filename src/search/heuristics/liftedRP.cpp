@@ -1617,14 +1617,14 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 	if (satMode){
 		DEBUG(cout << "Parameter arity " << maxArity << " Objects " << task.objects.size() << endl);
 		// start the incremental search for a plan	
-		for (int pastLimit = 1; pastLimit < 105; pastLimit++){
+		for (int pastLimit = 1; pastLimit < 205; pastLimit++){
 			cout << "Past Limit " << pastLimit << endl;
 		
 			std::clock_t start = std::clock();
 			void* solver = ipasir_init();
 			sat_capsule capsule;
 			reset_number_of_clauses();
-			int maxPlanLength = 105;
+			int maxPlanLength = 205;
 			solverTotal = 0;
 
 			goalSupporterVars.clear();
@@ -1677,7 +1677,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 
 		
 			planLength = 0;
-			while (planLength < 100){
+			while (planLength < 200){
 				planLength++;
 				compute_heuristic_sat(s,task,start,solver,capsule,true,false,pastLimit);
 			}
