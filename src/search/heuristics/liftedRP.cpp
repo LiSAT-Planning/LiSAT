@@ -933,7 +933,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 
 			for (int pTime = startTime; pTime < time; pTime++){
-			//for (int pTime = 0; pTime < time; pTime++){
     			vector<int> equalVarsB;
 				for (int paramterBefore = 0; paramterBefore < numberOfArgumentPositions; paramterBefore++){
 					DEBUG(cout << paramterThis << " = " << paramterBefore << " @ " << pTime); 
@@ -954,11 +953,11 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						int thisLower = lowerTindex[typeOfArgument[paramterThis]];
 						int beforeLower = lowerTindex[typeOfArgument[paramterBefore]];
 						for(int o : equalsPairs[{paramterThis,paramterBefore}]){
-							if (o < lowerTindex[typeOfArgument[paramterThis]] || o > upperTindex[typeOfArgument[paramterThis]])
+							if (o < lowerTindex[typeOfArgument[paramterThis]] || o > upperTindex[typeOfArgument[paramterThis]]){
 								impliesNot(solver,equalsVar, parameterVars[pTime][paramterBefore][o-beforeLower]);
-							else if (o < lowerTindex[typeOfArgument[paramterBefore]] || o > upperTindex[typeOfArgument[paramterBefore]])
-								impliesNot(solver,equalsVar, parameterVars[pTime][paramterThis][o-thisLower]);
-							else {
+							} else if (o < lowerTindex[typeOfArgument[paramterBefore]] || o > upperTindex[typeOfArgument[paramterBefore]]){
+								impliesNot(solver,equalsVar, parameterVars[time][paramterThis][o-thisLower]);
+							} else {
 								// need to subtract the starting values of the types
 								andImplies(solver,equalsVar, parameterVars[time][paramterThis][o-thisLower], parameterVars[pTime][paramterBefore][o-beforeLower]);
 								andImplies(solver,equalsVar, parameterVars[pTime][paramterBefore][o-beforeLower], parameterVars[time][paramterThis][o-thisLower]);
