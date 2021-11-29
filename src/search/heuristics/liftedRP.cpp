@@ -1176,7 +1176,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				
 				//////// 3. Step: Supporter of type 2: other actions
 				// times not to use
-				for (size_t i = 1; i < startTime + 1; i++)
+				for (int i = 1; i < startTime + 1; i++)
 					impliesNot(solver,actionVar,precSupporter[prec][i]);
 				
 				// times to use
@@ -1384,7 +1384,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 						set<int> neededVariables;
 						neededVariables.insert(actionVar);
-						neededVariables.insert(initNotTrueAfter[time][possiblyDeletedTuples[i].second]);
 						for (size_t j = 0; j < tuple.size(); j++){
 							int myObjIndex = objToIndex[tuple[j]];
 							if (!eff.arguments[j].constant){
@@ -1393,7 +1392,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 									neededVariables.insert(parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
 							}
 						}
-						notAll(solver,neededVariables);
+						andImplies(solver,neededVariables,initNotTrueAfter[time][possiblyDeletedTuples[i].second]);
 					}
     			}
 			}
