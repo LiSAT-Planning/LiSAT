@@ -107,7 +107,7 @@ add_executable(search
 		heuristics/liftedRP.cpp heuristics/liftedRP.h
 		heuristics/sat_encoder.cpp heuristics/sat_encoder.h
 		heuristics/ipasir.h
-		heuristics/kissat.h heuristics/kissat.cpp
+		#heuristics/kissat.h heuristics/kissat.cpp
 		)
 
 add_library(cplex SHARED IMPORTED)
@@ -130,8 +130,8 @@ set_target_properties(concert  PROPERTIES
 
 target_link_options(search PUBLIC ${linker_flags})
 
-#target_link_libraries(search PRIVATE ipasircryptominisat5)
-target_link_libraries(search PRIVATE kissat)
+target_link_libraries(search PRIVATE ipasircryptominisat5)
+#target_link_libraries(search PRIVATE kissat)
 
 target_link_libraries(search PRIVATE ilocplex)
 target_link_libraries(search PRIVATE concert)
