@@ -1483,6 +1483,14 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		bef = get_number_of_clauses();
 
 
+		if (time){
+			for (int thisAction : actionVarsTime)
+				impliesOr(solver,thisAction,actionVars.back());
+		}
+
+
+
+
 		actionVars.push_back(actionVarsTime);
 		if (forceActionEveryStep) atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
 		//atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
