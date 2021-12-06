@@ -1813,7 +1813,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 					}
 
 					// we only test executable plans and if the goal is a dead end ...
-					if (!gc) return 0;
+					//if (!gc) return 0;
 
 					
 					for (int n : task.nullary_predicates){
