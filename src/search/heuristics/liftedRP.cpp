@@ -1002,6 +1002,15 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		//exit(0);
 		bef = get_number_of_clauses();
 
+
+		// times not to use
+		for (int p = 0; p < maxPrec; p++)
+			for (int i = 1; i < startTime + 1; i++)
+				//impliesNot(solver,actionVar,precSupporter[prec][i]);
+				ipasir_assume(solver,-precSupporter[time][p][i]);
+
+
+
 		/// action variables
 		std::vector<int> actionVarsTime;
 		for (size_t action = 0; action < task.actions.size(); action++){
@@ -1312,10 +1321,6 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				
 				
 				//////// 3. Step: Supporter of type 2: other actions
-				// times not to use
-				for (int i = 1; i < startTime + 1; i++)
-					//impliesNot(solver,actionVar,precSupporter[prec][i]);
-					ipasir_assume(solver,-precSupporter[time][prec][i]);
 			
 				// times to use
 				int endTime = precSupporter[time][prec].size();
