@@ -1005,9 +1005,11 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 		// times not to use
 		for (int p = 0; p < maxPrec; p++)
-			for (int i = 1; i < startTime + 1; i++)
+			for (int i = 1; i < startTime + 1; i++){
+				cout << "FUP" << endl;
 				//impliesNot(solver,actionVar,precSupporter[prec][i]);
 				ipasir_assume(solver,-precSupporter[time][p][i]);
+			}
 
 
 
@@ -1942,7 +1944,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 				}
 				
 				planLength++;
-				if (compute_heuristic_sat(s,task,start,solver,capsule,false,linearIncrease || !incremental,false,false)){
+				if (compute_heuristic_sat(s,task,start,solver,capsule,false,linearIncrease,!incremental,false)){
 					ipasir_release(solver);
 					cout << "\t\tPlan of length: " << planLength << endl;
 					DEBUG(cout << "\t\tPlan of length: " << planLength << endl);
