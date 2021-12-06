@@ -22,8 +22,9 @@ vector<vector<vector<pair<vector<int>,int>>>> supportingTuples; // action -> pre
 vector<vector<vector<pair<vector<int>,int>>>> deletedTuples; // action -> precondition
 
 
-liftedRP::liftedRP(const Task task) {
-    numActions = task.actions.size();
+liftedRP::liftedRP(const Task task, int limit) {
+    maxLen = limit;
+	numActions = task.actions.size();
     numObjs = task.objects.size();
 
 	map<int,int> maxNum;
@@ -716,6 +717,10 @@ std::vector<std::vector<int>> actionVars;
 std::unordered_map<int,int> lastNullary;
 std::vector<std::vector<int>> initNotTrueAfter;
 
+std::vector<std::vector<std::vector<std::vector<int>>>> parameterEquality;
+std::vector<std::vector<std::vector<int>>> precSupporter;
+std::vector<std::vector<std::vector<int>>> precSupporterOver;
+
 double solverTotal;
 
 
@@ -735,7 +740,7 @@ int goalAchiever = 0;
 int goalDeleter = 0; 
 
 
-bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, int pastLimit) {
+bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, bool pastIncremental, int pastLimit) {
 	//for (size_t action = 0; action < task.actions.size(); action++){
 	//	for (size_t param = 0; param < task.actions[action].get_parameters().size(); param++){
 	//		int myType = task.actions[action].get_parameters()[param].type;
@@ -747,6 +752,11 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 	//}
 
 	//exit(0);
+
+
+	bool generateBaseFormula = true;
+	// don't generate the base formula if we are generating for a past limit other than one and we are in a satisficing run
+	if (pastIncremental && pastLimit != 1) generateBaseFormula = false; 
 
 
 	map<pair<int,int>,set<int>> equalsPairs;
@@ -834,105 +844,113 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 		// generate nullary variables
 		std::unordered_map<int,int> currentNullary;
-		for (int n : task.nullary_predicates){
-			int nullVar = capsule.new_variable();
-			currentNullary[n] = nullVar;
-			DEBUG(capsule.registerVariable(nullVar,	"nullary#" + to_string(n) + "_" + to_string(time)));
-		}
-
-
-		std::vector<int> initNotTrueAfterThis;
-		for (tSize i = 0; i < s.get_relations().size(); i++) {
-		    auto rel = s.get_relations()[i];
-		    auto tuple = s.get_tuples_of_relation(i);
-			
-			for (size_t j = 0; j < tuple.size(); j++){
-				int initAtom = capsule.new_variable();
-				DEBUG(capsule.registerVariable(initAtom, "initAtomFalseAfter@" + to_string(time) + "#" + to_string(i) + "-" + to_string(j)));
-				// if init atom as false after previous step, it is false now!
-				if (initNotTrueAfter.size())
-					implies(solver,initNotTrueAfter.back()[initNotTrueAfterThis.size()],initAtom);
-				initNotTrueAfterThis.push_back(initAtom);
-			}
-		}
-		initNotTrueAfter.push_back(initNotTrueAfterThis);
-		bef = get_number_of_clauses();
-		variableInitMaintenance += get_number_of_clauses() - bef;
-
-		std::vector<std::vector<int>> parameterVarsTime(numberOfArgumentPositions);
-    	for (int paramter = 0; paramter < numberOfArgumentPositions; paramter++){
-			int type = typeOfArgument[paramter];
-			int lower = lowerTindex[type];
-			int upper = upperTindex[type];
-			
-			parameterVarsTime[paramter].resize(upper - lower + 1);
-
-			for (int o = 0; o < upper - lower + 1; o++){
-				int objectVar = capsule.new_variable();
-				parameterVarsTime[paramter][o] = objectVar;
-				DEBUG(capsule.registerVariable(objectVar, "const@" + to_string(time) + "#" + to_string(paramter) + "-" + task.objects[indexToObj[o + lower]].getName()));
-			}
-			// each parameter can have at most one value
-			int a = get_number_of_clauses();
-			atMostOne(solver,capsule,parameterVarsTime[paramter]);
-		}
-		parameterVars.push_back(parameterVarsTime);
-
-		atMostOneParamterValue += get_number_of_clauses() - bef;
-		bef = get_number_of_clauses();
-
-		/// General supporter selection (no specific precondition is considered here)
-		std::vector<std::vector<int>> precSupporter;
-		// precondition support selection
-		for (int p = 0; p < maxPrec; p++){
-			std::vector<int> precSupporterPrec;
-			for (int pTime = -1; pTime < time; pTime++){
-				int preSuppVar = capsule.new_variable();
-				precSupporterPrec.push_back(preSuppVar);
-				DEBUG(capsule.registerVariable(preSuppVar, "preSupp@" + to_string(time) + "#" + to_string(p) + "-" + to_string(pTime)));
-			}
-
-			precSupporter.push_back(precSupporterPrec);
-		}
-
-		/// variables stating over which variables a support spans
-		// precSupporterOver[p][ptime] is true if there is support for precondition p spanning *over* time ptime
-		std::vector<std::vector<int>> precSupporterOver;
-		for (int p = 0; p < maxPrec; p++){
-			std::vector<int> supportOver;
-			for (int pTime = 0; pTime < time; pTime++){
-				int overVar = capsule.new_variable();
-				implies(solver,precSupporter[p][pTime], overVar);
-				if (pTime > 0)
-					implies(solver,supportOver.back(),overVar);
-				
-				supportOver.push_back(overVar);
-				DEBUG(capsule.registerVariable(overVar, "supportOver@" + to_string(time) + "#" + to_string(p) + "-" + to_string(pTime)));
-			}
-
-			precSupporterOver.push_back(supportOver);
-		}
-
-		precSupport += get_number_of_clauses() - bef;
-		bef = get_number_of_clauses();
 		
+		if (generateBaseFormula){
+			for (int n : task.nullary_predicates){
+				int nullVar = capsule.new_variable();
+				currentNullary[n] = nullVar;
+				DEBUG(capsule.registerVariable(nullVar,	"nullary#" + to_string(n) + "_" + to_string(time)));
+			}
+
+
+			std::vector<int> initNotTrueAfterThis;
+			for (tSize i = 0; i < s.get_relations().size(); i++) {
+			    auto rel = s.get_relations()[i];
+			    auto tuple = s.get_tuples_of_relation(i);
+				
+				for (size_t j = 0; j < tuple.size(); j++){
+					int initAtom = capsule.new_variable();
+					DEBUG(capsule.registerVariable(initAtom, "initAtomFalseAfter@" + to_string(time) + "#" + to_string(i) + "-" + to_string(j)));
+					// if init atom as false after previous step, it is false now!
+					if (initNotTrueAfter.size())
+						implies(solver,initNotTrueAfter.back()[initNotTrueAfterThis.size()],initAtom);
+					initNotTrueAfterThis.push_back(initAtom);
+				}
+			}
+			initNotTrueAfter.push_back(initNotTrueAfterThis);
+			bef = get_number_of_clauses();
+			variableInitMaintenance += get_number_of_clauses() - bef;
+
+			std::vector<std::vector<int>> parameterVarsTime(numberOfArgumentPositions);
+    		for (int paramter = 0; paramter < numberOfArgumentPositions; paramter++){
+				int type = typeOfArgument[paramter];
+				int lower = lowerTindex[type];
+				int upper = upperTindex[type];
+				
+				parameterVarsTime[paramter].resize(upper - lower + 1);
+
+				for (int o = 0; o < upper - lower + 1; o++){
+					int objectVar = capsule.new_variable();
+					parameterVarsTime[paramter][o] = objectVar;
+					DEBUG(capsule.registerVariable(objectVar, "const@" + to_string(time) + "#" + to_string(paramter) + "-" + task.objects[indexToObj[o + lower]].getName()));
+				}
+				// each parameter can have at most one value
+				int a = get_number_of_clauses();
+				atMostOne(solver,capsule,parameterVarsTime[paramter]);
+			}
+			parameterVars.push_back(parameterVarsTime);
+
+			atMostOneParamterValue += get_number_of_clauses() - bef;
+			bef = get_number_of_clauses();
+
+			/// General supporter selection (no specific precondition is considered here)
+			std::vector<std::vector<int>> precSupporterThisTime;
+			// precondition support selection
+			for (int p = 0; p < maxPrec; p++){
+				std::vector<int> precSupporterPrec;
+				for (int pTime = -1; pTime < time; pTime++){
+					int preSuppVar = capsule.new_variable();
+					precSupporterPrec.push_back(preSuppVar);
+					DEBUG(capsule.registerVariable(preSuppVar, "preSupp@" + to_string(time) + "#" + to_string(p) + "-" + to_string(pTime)));
+				}
+
+				precSupporterThisTime.push_back(precSupporterPrec);
+			}
+			precSupporter.push_back(precSupporterThisTime);
+
+			/// variables stating over which variables a support spans
+			// precSupporterOver[p][ptime] is true if there is support for precondition p spanning *over* time ptime
+			std::vector<std::vector<int>> precSupporterOverThisTime;
+			for (int p = 0; p < maxPrec; p++){
+				std::vector<int> supportOver;
+				for (int pTime = 0; pTime < time; pTime++){
+					int overVar = capsule.new_variable();
+					implies(solver,precSupporter[time][p][pTime], overVar);
+					if (pTime > 0)
+						implies(solver,supportOver.back(),overVar);
+					
+					supportOver.push_back(overVar);
+					DEBUG(capsule.registerVariable(overVar, "supportOver@" + to_string(time) + "#" + to_string(p) + "-" + to_string(pTime)));
+				}
+
+				precSupporterOverThisTime.push_back(supportOver);
+			}
+			precSupporterOver.push_back(precSupporterOverThisTime);
+
+			precSupport += get_number_of_clauses() - bef;
+			bef = get_number_of_clauses();
+		}	
 		
 		int startTime = max(0,time-pastLimit);
 
 		/// Variables tracking equality of task parameters	
-		std::vector<std::vector<std::vector<int>>> parameterEquality;
-		DEBUG(cout << "NAP " << numberOfArgumentPositions << endl);
+		std::vector<std::vector<std::vector<int>>> parameterEqualityThisTime;
 		for (int paramterThis = 0; paramterThis < numberOfArgumentPositions; paramterThis++){
-			DEBUG(cout << "NAP A " << paramterThis << endl);
     		vector<vector<int>> equalVarsP;
-			// fill with empty entries
-			for (int pTime = 0; pTime < startTime; pTime++){
-    			vector<int> equalVarsB;
-				equalVarsP.push_back(equalVarsB);
+			
+			if (generateBaseFormula){
+				// fill with empty entries
+				for (int pTime = 0; pTime < startTime; pTime++){
+    				vector<int> equalVarsB (numberOfArgumentPositions);
+					equalVarsP.push_back(equalVarsB);
+				}
 			}
 
 
-			for (int pTime = startTime; pTime < time; pTime++){
+			int endTime = time;
+			if (!generateBaseFormula && endTime) endTime = startTime+1;
+
+			for (int pTime = startTime; pTime < endTime; pTime++){
     			vector<int> equalVarsB;
 				for (int paramterBefore = 0; paramterBefore < numberOfArgumentPositions; paramterBefore++){
 					DEBUG(cout << paramterThis << " = " << paramterBefore << " @ " << pTime); 
@@ -968,10 +986,16 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 						DEBUG(cout << " generated " << sz << endl); 
 					}
 				}
-				equalVarsP.push_back(equalVarsB);
+				if (generateBaseFormula)
+					equalVarsP.push_back(equalVarsB);
+				else{
+					//cout << parameterEquality[time][paramterThis].size() << " " << pTime << " " << time << endl; 
+					parameterEquality[time][paramterThis][pTime] = equalVarsB;
+				}
 			}
-			parameterEquality.push_back(equalVarsP);
+			if (generateBaseFormula) parameterEqualityThisTime.push_back(equalVarsP);
 		}
+		if (generateBaseFormula) parameterEquality.push_back(parameterEqualityThisTime);
 		
 		equals += get_number_of_clauses() - bef;
 		DEBUG(cout << "EQUALS clauses " << equals << endl);
@@ -979,50 +1003,57 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 		bef = get_number_of_clauses();
 
 		/// action variables
-		std::vector<int> actionVarsTime;	
+		std::vector<int> actionVarsTime;
 		for (size_t action = 0; action < task.actions.size(); action++){
             DEBUG(cout << "\t" << task.actions[action].get_name() << endl);
 
-			int actionVar = capsule.new_variable();
-			actionVarsTime.push_back(actionVar);
-			DEBUG(capsule.registerVariable(actionVar,"action@" + to_string(time) + "-" + task.actions[action].get_name()));
+			int actionVar;
+			if (generateBaseFormula){  
+				actionVar = capsule.new_variable();
+				actionVarsTime.push_back(actionVar);
+				DEBUG(capsule.registerVariable(actionVar,"action@" + to_string(time) + "-" + task.actions[action].get_name()));
+			} else {
+				actionVar = actionVars[time][action];
+			}
 		
 			bef = get_number_of_clauses();
 
 			// typing implications!
             auto params = task.actions[action].get_parameters();
-            for (size_t l = 0; l < params.size(); l++) {
-				int thisParameterIndex = actionArgumentPositions[action][l];
-                DEBUG(cout << "\t\t" << task.type_names[params[l].type] << ": ");
-                //if (!needToType[{action,l}]){
-                //	DEBUG(cout << "no need to type " << endl);
-				//	continue;
-				//}
-				
-				int lower = lowerTindex[params[l].type];
-                int upper = upperTindex[params[l].type];
-                DEBUG(for (int m = lower; m <= upper; m++) {
-                    cout << task.objects[indexToObj[m]].getName() << " ";
-                }
-                cout << endl);
+			if (generateBaseFormula){
+            	for (size_t l = 0; l < params.size(); l++) {
+					int thisParameterIndex = actionArgumentPositions[action][l];
+            	    DEBUG(cout << "\t\t" << task.type_names[params[l].type] << ": ");
+            	    //if (!needToType[{action,l}]){
+            	    //	DEBUG(cout << "no need to type " << endl);
+					//	continue;
+					//}
+					
+					int lower = lowerTindex[params[l].type];
+            	    int upper = upperTindex[params[l].type];
+            	    DEBUG(for (int m = lower; m <= upper; m++) {
+            	        cout << task.objects[indexToObj[m]].getName() << " ";
+            	    }
+            	    cout << endl);
 
-				//for (int i = 0; i < lower; i++){
-				//	int parameterConstantVar = parameterVars[time][l][i];
-				//	impliesNot(solver,actionVar,parameterConstantVar);
-				//}
+					//for (int i = 0; i < lower; i++){
+					//	int parameterConstantVar = parameterVars[time][l][i];
+					//	impliesNot(solver,actionVar,parameterConstantVar);
+					//}
 
-				//for (int i = upper + 1; i < int(task.objects.size()); i++){
-				//	int parameterConstantVar = parameterVars[time][l][i];
-				//	impliesNot(solver,actionVar,parameterConstantVar);
-				//}
+					//for (int i = upper + 1; i < int(task.objects.size()); i++){
+					//	int parameterConstantVar = parameterVars[time][l][i];
+					//	impliesNot(solver,actionVar,parameterConstantVar);
+					//}
 
-				std::vector<int> allowed;
-				for (int i = 0; i <= upper - lower; i++){
-					int parameterConstantVar = parameterVars[time][thisParameterIndex][i];
-					allowed.push_back(parameterConstantVar);
-				}
-				impliesOr(solver,actionVar,allowed);
-            }
+					std::vector<int> allowed;
+					for (int i = 0; i <= upper - lower; i++){
+						int parameterConstantVar = parameterVars[time][thisParameterIndex][i];
+						allowed.push_back(parameterConstantVar);
+					}
+					impliesOr(solver,actionVar,allowed);
+            	}
+			}
 
 			// TODO this is actually not necessary ... I will never access these variables anyway
             //for (int l = params.size(); l < maxArity; l++) {
@@ -1032,19 +1063,21 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 			actionTyping += get_number_of_clauses() - bef;
 			bef = get_number_of_clauses();
 
-            DEBUG(cout << "\t\tnullary" << endl);
 
+			if (generateBaseFormula){
+        	    DEBUG(cout << "\t\tnullary" << endl);
 
-			// nullary preconditions
-			for (int p : *setPosNullaryPrec[action])
-				implies(solver,actionVar,lastNullary[p]);
-			for (int p : *setNegNullaryPrec[action])
-				impliesNot(solver,actionVar,lastNullary[p]);
+				// nullary preconditions
+				for (int p : *setPosNullaryPrec[action])
+					implies(solver,actionVar,lastNullary[p]);
+				for (int p : *setNegNullaryPrec[action])
+					impliesNot(solver,actionVar,lastNullary[p]);
 
-			for (int p : *setPosNullaryEff[action])
-				implies(solver,actionVar,currentNullary[p]);
-			for (int p : *setNegNullaryEff[action])
-				impliesNot(solver,actionVar,currentNullary[p]);
+				for (int p : *setPosNullaryEff[action])
+					implies(solver,actionVar,currentNullary[p]);
+				for (int p : *setNegNullaryEff[action])
+					impliesNot(solver,actionVar,currentNullary[p]);
+			}
 			
 			nullary += get_number_of_clauses() - bef;
 			bef = get_number_of_clauses();
@@ -1061,49 +1094,51 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 				if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
 			
 				bef = get_number_of_clauses();
-				
+			
 				if (task.predicates[predicate].getName().rfind("=", 0) == 0){
-					int varA = precObjec.arguments[0].index;
-					int varB = precObjec.arguments[1].index;
+					if (generateBaseFormula){
+						int varA = precObjec.arguments[0].index;
+						int varB = precObjec.arguments[1].index;
 
-					if (precObjec.negated){
-						// not equals
-						if (precObjec.arguments[0].constant){
-							int myObjIndex = objToIndex[varA];
-							varB = actionArgumentPositions[action][varB];
-							impliesNot(solver,actionVar, parameterVars[time][varB][myObjIndex - lowerTindex[typeOfArgument[varB]]]);
-						} else if (precObjec.arguments[1].constant){
-							int myObjIndex = objToIndex[varB];
-							varA = actionArgumentPositions[action][varA];
-							impliesNot(solver,actionVar, parameterVars[time][varA][myObjIndex - lowerTindex[typeOfArgument[varA]]]);
-						} else {
-							varA = actionArgumentPositions[action][varA];
-							varB = actionArgumentPositions[action][varB];
-							for(int o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
-									o <= min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
-								andImpliesNot(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
-										parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]]);
+						if (precObjec.negated){
+							// not equals
+							if (precObjec.arguments[0].constant){
+								int myObjIndex = objToIndex[varA];
+								varB = actionArgumentPositions[action][varB];
+								impliesNot(solver,actionVar, parameterVars[time][varB][myObjIndex - lowerTindex[typeOfArgument[varB]]]);
+							} else if (precObjec.arguments[1].constant){
+								int myObjIndex = objToIndex[varB];
+								varA = actionArgumentPositions[action][varA];
+								impliesNot(solver,actionVar, parameterVars[time][varA][myObjIndex - lowerTindex[typeOfArgument[varA]]]);
+							} else {
+								varA = actionArgumentPositions[action][varA];
+								varB = actionArgumentPositions[action][varB];
+								for(int o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
+										o <= min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
+									andImpliesNot(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
+											parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]]);
+								}
 							}
-						}
-					} else {
-						// equals
-						if (precObjec.arguments[0].constant){
-							int myObjIndex = objToIndex[varA];
-							varB = actionArgumentPositions[action][varB];
-							implies(solver,actionVar, parameterVars[time][varB][myObjIndex - lowerTindex[typeOfArgument[varB]]]);
-						} else if (precObjec.arguments[1].constant){
-							int myObjIndex = objToIndex[varB];
-							varA = actionArgumentPositions[action][varA];
-							implies(solver,actionVar, parameterVars[time][varA][myObjIndex - lowerTindex[typeOfArgument[varA]]]);
 						} else {
-							varA = actionArgumentPositions[action][varA];
-							varB = actionArgumentPositions[action][varB];
-							for(int o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
-									o <= min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
-								andImplies(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
-										parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]]);
-								andImplies(solver,actionVar,parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]],
-										parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]]);
+							// equals
+							if (precObjec.arguments[0].constant){
+								int myObjIndex = objToIndex[varA];
+								varB = actionArgumentPositions[action][varB];
+								implies(solver,actionVar, parameterVars[time][varB][myObjIndex - lowerTindex[typeOfArgument[varB]]]);
+							} else if (precObjec.arguments[1].constant){
+								int myObjIndex = objToIndex[varB];
+								varA = actionArgumentPositions[action][varA];
+								implies(solver,actionVar, parameterVars[time][varA][myObjIndex - lowerTindex[typeOfArgument[varA]]]);
+							} else {
+								varA = actionArgumentPositions[action][varA];
+								varB = actionArgumentPositions[action][varB];
+								for(int o = max(lowerTindex[typeOfArgument[varA]],lowerTindex[typeOfArgument[varB]]);
+										o <= min(upperTindex[typeOfArgument[varA]],upperTindex[typeOfArgument[varB]]); o++){
+									andImplies(solver,actionVar,parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]],
+											parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]]);
+									andImplies(solver,actionVar,parameterVars[time][varB][o - lowerTindex[typeOfArgument[varB]]],
+											parameterVars[time][varA][o - lowerTindex[typeOfArgument[varA]]]);
+								}
 							}
 						}
 					}
@@ -1115,178 +1150,183 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 				// 1. Step: select the time step which supports
 				// precSupporter is a generic variable that just tells you from which timestep we take the support
-				impliesOr(solver,actionVar,precSupporter[prec]);
+				if (generateBaseFormula) impliesOr(solver,actionVar,precSupporter[time][prec]);
 			
 				// 2. Step: Supporter of type 1: initial state
 				// achiever structure contains both achievers and deleters
 				ActionPrecAchiever* myAchievers = achievers[action]->precAchievers[prec];
 
 				bef = get_number_of_clauses();
-				if (supportingTuples[action][prec].size() == 0){
-					DEBUG(cout << "\t\tno init support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
-					impliesNot(solver,actionVar,precSupporter[prec][0]); // cannot be supported by init!
-				} else {
-					if (supportingTuples[action][prec].size() == 1){
-						// if this action is chosen, exactly this tuple has to be used as the precondition
-						vector<int> tuple = supportingTuples[action][prec][0].first;
-						for (size_t j = 0; j < tuple.size(); j++){
-							int myObjIndex = objToIndex[tuple[j]];
-							if (precObjec.arguments[j].constant){
-								if (precObjec.arguments[j].index != tuple[j]){
-									if (task.predicates[predicate].isStaticPredicate())
-										assertNot(solver,actionVar);
-									else
-										impliesNot(solver,actionVar,precSupporter[prec][0]);
-								}
-							} else {
-								int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
-								if (myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]]){
-									if (task.predicates[predicate].isStaticPredicate())
-										assertNot(solver,actionVar);
-									else
-										impliesNot(solver,actionVar,precSupporter[prec][0]);
+				if (generateBaseFormula){
+					if (supportingTuples[action][prec].size() == 0){
+						DEBUG(cout << "\t\tno init support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
+						impliesNot(solver,actionVar,precSupporter[time][prec][0]); // cannot be supported by init!
+					} else {
+						if (supportingTuples[action][prec].size() == 1){
+							// if this action is chosen, exactly this tuple has to be used as the precondition
+							vector<int> tuple = supportingTuples[action][prec][0].first;
+							for (size_t j = 0; j < tuple.size(); j++){
+								int myObjIndex = objToIndex[tuple[j]];
+								if (precObjec.arguments[j].constant){
+									if (precObjec.arguments[j].index != tuple[j]){
+										if (task.predicates[predicate].isStaticPredicate())
+											assertNot(solver,actionVar);
+										else
+											impliesNot(solver,actionVar,precSupporter[time][prec][0]);
+									}
 								} else {
-									if (task.predicates[predicate].isStaticPredicate())
-										implies(solver,actionVar, parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
-									else
-										impliesAnd(solver,actionVar,precSupporter[prec][0], parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+									int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+									if (myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]]){
+										if (task.predicates[predicate].isStaticPredicate())
+											assertNot(solver,actionVar);
+										else
+											impliesNot(solver,actionVar,precSupporter[time][prec][0]);
+									} else {
+										if (task.predicates[predicate].isStaticPredicate())
+											implies(solver,actionVar, parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+										else
+											impliesAnd(solver,actionVar,precSupporter[time][prec][0], parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+									}
+								}
+							}
+						} else {
+							if (precObjec.arguments.size() == 1){
+								vector<int> possibleValues;
+								
+								for (size_t i = 0; i < supportingTuples[action][prec].size(); i++){
+									vector<int> tuple = supportingTuples[action][prec][i].first;
+								
+									int myObjIndex = objToIndex[tuple[0]];
+									int myParam = actionArgumentPositions[action][precObjec.arguments[0].index];
+									int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
+									
+									possibleValues.push_back(constantVar);
+								}
+
+								if (task.predicates[predicate].isStaticPredicate())
+									impliesOr(solver,actionVar,possibleValues);
+								else
+									impliesOr(solver,actionVar,precSupporter[time][prec][0],possibleValues);
+							} else {
+								bool firstWithNonConst = true;
+								for (size_t lastPos = 0; lastPos < precObjec.arguments.size() - 1 ; lastPos++){
+									// ignore all arguments until we find the first one with a non-constant
+									if (precObjec.arguments[lastPos].constant && firstWithNonConst) continue;
+
+									map<vector<int>,set<int>> possibleUpto;
+	
+									// build assignment tuple up to this point
+									for (size_t i = 0; i < supportingTuples[action][prec].size(); i++){
+										vector<int> tuple = supportingTuples[action][prec][i].first;
+										vector<int> subTuple;
+										subTuple.push_back(actionVar);
+										if (!task.predicates[predicate].isStaticPredicate())
+											subTuple.push_back(precSupporter[time][prec][0]);
+									
+										for (size_t j = 0; j <= lastPos; j++){
+											// push only the non-constants
+											if (precObjec.arguments[j].constant) continue;
+											int myObjIndex = objToIndex[tuple[j]];
+											int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+											int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
+											
+											subTuple.push_back(constantVar);
+										}
+										
+										if (precObjec.arguments[lastPos + 1].constant) {
+											possibleUpto[subTuple].insert(0);
+											continue;
+										}
+
+										int myObjIndex = objToIndex[tuple[lastPos + 1]];
+										int myParam = actionArgumentPositions[action][precObjec.arguments[lastPos + 1].index];
+										int localObjectNumber = myObjIndex - lowerTindex[typeOfArgument[myParam]];
+										//if (localObjectNumber >= parameterVars[time][myParam].size()) cout << "F " << localObjectNumber << " " << parameterVars[time][myParam].size() << endl;
+										int constantVar = parameterVars[time][myParam][localObjectNumber];
+
+
+										possibleUpto[subTuple].insert(constantVar);
+									}
+
+
+									if (!precObjec.arguments[lastPos + 1].constant)
+										for (auto & x : possibleUpto){
+											andImpliesOr(solver,x.first,x.second);
+											//for (int i : x.first) cout << " - " << capsule.variableNames[i];
+											//for (int i : x.second) cout << " " << capsule.variableNames[i];
+											//cout << endl;
+										}
+
+
+									int posOfValue = 1;
+									if (!task.predicates[predicate].isStaticPredicate()) posOfValue = 2;
+
+									if (firstWithNonConst){
+										vector<int> initial;
+										for (auto & x : possibleUpto)
+											initial.push_back(x.first[posOfValue]);
+	
+										if (task.predicates[predicate].isStaticPredicate())
+											impliesOr(solver,actionVar,initial);
+										else
+											impliesOr(solver,actionVar,precSupporter[time][prec][0],initial);
+										//cout << "- " << capsule.variableNames[actionVar];
+										//for (int i : initial) cout << " " << capsule.variableNames[i];
+										//cout << endl;
+										firstWithNonConst = false;
+									}
 								}
 							}
 						}
-					} else {
-						if (precObjec.arguments.size() == 1){
-							vector<int> possibleValues;
+						staticInitSupp += get_number_of_clauses() - bef;
+						bef = get_number_of_clauses();
+						
+						if (!task.predicates[predicate].isStaticPredicate() && time){
+							//////// NON static predicate
+							DEBUG(cout << "\t\tinit support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
 							
 							for (size_t i = 0; i < supportingTuples[action][prec].size(); i++){
 								vector<int> tuple = supportingTuples[action][prec][i].first;
-							
-								int myObjIndex = objToIndex[tuple[0]];
-								int myParam = actionArgumentPositions[action][precObjec.arguments[0].index];
-								int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
 								
-								possibleValues.push_back(constantVar);
-							}
-
-							if (task.predicates[predicate].isStaticPredicate())
-								impliesOr(solver,actionVar,possibleValues);
-							else
-								impliesOr(solver,actionVar,precSupporter[prec][0],possibleValues);
-						} else {
-							bool firstWithNonConst = true;
-							for (size_t lastPos = 0; lastPos < precObjec.arguments.size() - 1 ; lastPos++){
-								// ignore all arguments until we find the first one with a non-constant
-								if (precObjec.arguments[lastPos].constant && firstWithNonConst) continue;
-
-								map<vector<int>,set<int>> possibleUpto;
-	
-								// build assignment tuple up to this point
-								for (size_t i = 0; i < supportingTuples[action][prec].size(); i++){
-									vector<int> tuple = supportingTuples[action][prec][i].first;
-									vector<int> subTuple;
-									subTuple.push_back(actionVar);
-									if (!task.predicates[predicate].isStaticPredicate())
-										subTuple.push_back(precSupporter[prec][0]);
-								
-									for (size_t j = 0; j <= lastPos; j++){
-										// push only the non-constants
-										if (precObjec.arguments[j].constant) continue;
-										int myObjIndex = objToIndex[tuple[j]];
+								// gather all variables that are true if we use this particular precondition
+								set<int> criticalVars;
+								criticalVars.insert(actionVar);
+								criticalVars.insert(precSupporter[time][prec][0]);
+								for (size_t j = 0; j < tuple.size(); j++){
+									int myObjIndex = objToIndex[tuple[j]];
+									if (!precObjec.arguments[j].constant){
 										int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
-										int constantVar = parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]];
-										
-										subTuple.push_back(constantVar);
+										if (!(myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]]))
+											criticalVars.insert(parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
 									}
-									
-									if (precObjec.arguments[lastPos + 1].constant) {
-										possibleUpto[subTuple].insert(0);
-										continue;
-									}
-
-									int myObjIndex = objToIndex[tuple[lastPos + 1]];
-									int myParam = actionArgumentPositions[action][precObjec.arguments[lastPos + 1].index];
-									int localObjectNumber = myObjIndex - lowerTindex[typeOfArgument[myParam]];
-									//if (localObjectNumber >= parameterVars[time][myParam].size()) cout << "F " << localObjectNumber << " " << parameterVars[time][myParam].size() << endl;
-									int constantVar = parameterVars[time][myParam][localObjectNumber];
-
-
-									possibleUpto[subTuple].insert(constantVar);
 								}
-
-
-								if (!precObjec.arguments[lastPos + 1].constant)
-									for (auto & x : possibleUpto){
-										andImpliesOr(solver,x.first,x.second);
-										//for (int i : x.first) cout << " - " << capsule.variableNames[i];
-										//for (int i : x.second) cout << " " << capsule.variableNames[i];
-										//cout << endl;
-									}
-
-
-								int posOfValue = 1;
-								if (!task.predicates[predicate].isStaticPredicate()) posOfValue = 2;
-
-								if (firstWithNonConst){
-									vector<int> initial;
-									for (auto & x : possibleUpto)
-										initial.push_back(x.first[posOfValue]);
-	
-									if (task.predicates[predicate].isStaticPredicate())
-										impliesOr(solver,actionVar,initial);
-									else
-										impliesOr(solver,actionVar,precSupporter[prec][0],initial);
-									//cout << "- " << capsule.variableNames[actionVar];
-									//for (int i : initial) cout << " " << capsule.variableNames[i];
-									//cout << endl;
-									firstWithNonConst = false;
-								}
+								// now they can't all be true *and* we have deleted the init
+								criticalVars.insert(initNotTrueAfter[time-1][supportingTuples[action][prec][i].second]);
+								notAll(solver,criticalVars);
 							}
 						}
+						initSupp += get_number_of_clauses() - bef;
+						bef = get_number_of_clauses();
 					}
-					staticInitSupp += get_number_of_clauses() - bef;
-					bef = get_number_of_clauses();
-					
-					if (!task.predicates[predicate].isStaticPredicate() && time){
-						//////// NON static predicate
-						DEBUG(cout << "\t\tinit support for precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
-						
-						for (size_t i = 0; i < supportingTuples[action][prec].size(); i++){
-							vector<int> tuple = supportingTuples[action][prec][i].first;
-							
-							// gather all variables that are true if we use this particular precondition
-							set<int> criticalVars;
-							criticalVars.insert(actionVar);
-							criticalVars.insert(precSupporter[prec][0]);
-							for (size_t j = 0; j < tuple.size(); j++){
-								int myObjIndex = objToIndex[tuple[j]];
-								if (!precObjec.arguments[j].constant){
-									int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
-									if (!(myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]]))
-										criticalVars.insert(parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
-								}
-							}
-							// now they can't all be true *and* we have deleted the init
-							criticalVars.insert(initNotTrueAfter[time-1][supportingTuples[action][prec][i].second]);
-							notAll(solver,criticalVars);
-						}
-					}
-					initSupp += get_number_of_clauses() - bef;
-					bef = get_number_of_clauses();
 				}
 				
 				
 				//////// 3. Step: Supporter of type 2: other actions
 				// times not to use
 				for (int i = 1; i < startTime + 1; i++)
-					impliesNot(solver,actionVar,precSupporter[prec][i]);
-				
+					//impliesNot(solver,actionVar,precSupporter[prec][i]);
+					ipasir_assume(solver,-precSupporter[time][prec][i]);
+			
 				// times to use
-				for (size_t i = startTime + 1; i < precSupporter[prec].size(); i++){
+				int endTime = precSupporter[time][prec].size();
+				if (!generateBaseFormula && pastLimit != 1) endTime = min(startTime + 2,endTime); // only generate this single supporter structure
+
+				for (size_t i = startTime + 1; i < endTime; i++){
 					if (myAchievers->achievers.size() == 0){
 						DEBUG(cout << "\t\tnon-achievable precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
-						impliesNot(solver,actionVar,precSupporter[prec][i]);
+						impliesNot(solver,actionVar,precSupporter[time][prec][i]);
 					} else {
 						DEBUG(cout << "\t\tachievable precondition #" << prec << " with pred " << predicate << " " << task.predicates[predicate].getName() << endl);
-						
 						// check if achiever have disjunct predicates
 						unordered_set<int> setset;
 						for (size_t j = 0; j < myAchievers->achievers.size(); j++)
@@ -1329,7 +1369,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 										if (!allDifferentActions)
 											implies(solver,achieverVar,parameterVars[time][myParam][objToIndex[theirConst] - lowerTindex[typeOfArgument[myParam]]]);
 										else
-											andImplies(solver,actionVar,precSupporter[prec][i],achieverVar,parameterVars[time][myParam][objToIndex[theirConst] - lowerTindex[typeOfArgument[myParam]]]);
+											andImplies(solver,actionVar,precSupporter[time][prec][i],achieverVar,parameterVars[time][myParam][objToIndex[theirConst] - lowerTindex[typeOfArgument[myParam]]]);
 									} else {
 										int myType = task.actions[action].get_parameters()[precObjec.arguments[k].index].type;
 										int theirType = task.actions[achiever->action].get_parameters()[theirParam].type; 
@@ -1341,10 +1381,10 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 										theirParam = actionArgumentPositions[achiever->action][theirParam];
 										if (lower != upper){
 											if (!allDifferentActions){
-												implies(solver,achieverVar,parameterEquality[myParam][i-1][theirParam]);
+												implies(solver,achieverVar,parameterEquality[time][myParam][i-1][theirParam]);
 											}
 											else {
-												andImplies(solver,actionVar,precSupporter[prec][i],achieverVar,parameterEquality[myParam][i-1][theirParam]);
+												andImplies(solver,actionVar,precSupporter[time][prec][i],achieverVar,parameterEquality[time][myParam][i-1][theirParam]);
 											}
 										}
 									}
@@ -1358,13 +1398,13 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 										if (!allDifferentActions)
 											implies(solver,achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
 										else
-											andImplies(solver,actionVar,precSupporter[prec][i],achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
+											andImplies(solver,actionVar,precSupporter[time][prec][i],achieverVar,parameterVars[i-1][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
 									
 									} // else two constants, this has been checked statically
 								}
 							}
 						}
-						impliesOr(solver,actionVar,precSupporter[prec][i],achieverSelection);
+						impliesOr(solver,actionVar,precSupporter[time][prec][i],achieverSelection);
 					}
 				}
 				achieverImplications += get_number_of_clauses() - bef;
@@ -1372,7 +1412,9 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 
 				// no deleter in between
-				for (int deleterTime = startTime; deleterTime < planLength - 1; deleterTime++){
+				endTime = planLength - 1;
+				if (!generateBaseFormula && pastLimit != 1 && endTime) endTime = startTime+1;
+				for (int deleterTime = startTime; deleterTime < endTime; deleterTime++){
 					for (size_t del = 0; del < myAchievers->destroyers.size(); del++){
 						Achiever* deleter = myAchievers->destroyers[del];
 
@@ -1398,7 +1440,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 									// then only one value is actually possible to we know that equality holds!
 									if (lower != upper){
-										criticalVars.push_back(parameterEquality[myParam][deleterTime][deleterParam]);
+										criticalVars.push_back(parameterEquality[time][myParam][deleterTime][deleterParam]);
 									}
 								} else {
 									// deleter is a constant
@@ -1421,7 +1463,7 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 						if (noNeed) continue;
 						
-						criticalVars.push_back(precSupporterOver[prec][deleterTime]);
+						criticalVars.push_back(precSupporterOver[time][prec][deleterTime]);
 						criticalVars.push_back(actionVar);
 						//cout << "CRIT";
 						//for (int x : criticalVars)
@@ -1439,62 +1481,63 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 			// this action might delete facts from init ...
         	auto thisAction = task.actions[action];
-            for (tSize ie = 0; ie < thisAction.get_effects().size(); ie++) {
-                auto eff = thisAction.get_effects()[ie];
-				if (!eff.negated) continue; // only negative effects can delete init facts
-				int predicate = eff.predicate_symbol;
+            if (generateBaseFormula){
+				for (tSize ie = 0; ie < thisAction.get_effects().size(); ie++) {
+                	auto eff = thisAction.get_effects()[ie];
+					if (!eff.negated) continue; // only negative effects can delete init facts
+					int predicate = eff.predicate_symbol;
 
-				for (size_t i = 0; i < deletedTuples[action][ie].size(); i++){
-					vector<int> tuple = deletedTuples[action][ie][i].first;
+					for (size_t i = 0; i < deletedTuples[action][ie].size(); i++){
+						vector<int> tuple = deletedTuples[action][ie][i].first;
 
-					set<int> neededVariables;
-					neededVariables.insert(actionVar);
-					for (size_t j = 0; j < tuple.size(); j++){
-						int myObjIndex = objToIndex[tuple[j]];
-						if (!eff.arguments[j].constant){
-							int myParam = actionArgumentPositions[action][eff.arguments[j].index];
-							if (!(myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]]))
-								neededVariables.insert(parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+						set<int> neededVariables;
+						neededVariables.insert(actionVar);
+						for (size_t j = 0; j < tuple.size(); j++){
+							int myObjIndex = objToIndex[tuple[j]];
+							if (!eff.arguments[j].constant){
+								int myParam = actionArgumentPositions[action][eff.arguments[j].index];
+								if (!(myObjIndex < lowerTindex[typeOfArgument[myParam]] || myObjIndex > upperTindex[typeOfArgument[myParam]]))
+									neededVariables.insert(parameterVars[time][myParam][myObjIndex - lowerTindex[typeOfArgument[myParam]]]);
+							}
 						}
+						andImplies(solver,neededVariables,initNotTrueAfter[time][deletedTuples[action][ie][i].second]);
 					}
-					andImplies(solver,neededVariables,initNotTrueAfter[time][deletedTuples[action][ie][i].second]);
 				}
 			}
 
 			noDeleter += get_number_of_clauses() - bef;
 			bef = get_number_of_clauses();
 		}
-		//exit(0);
 
 		// frame axioms for nullary predicates
 		bef = get_number_of_clauses();
-		for (int n : task.nullary_predicates){
-			vector<int> adder;
-			for (int a : nullaryAchiever[n])
-			   adder.push_back(actionVarsTime[a]);
-			impliesPosAndNegImpliesOr(solver,currentNullary[n], lastNullary[n], adder);
+		if (generateBaseFormula){
+			for (int n : task.nullary_predicates){
+				vector<int> adder;
+				for (int a : nullaryAchiever[n])
+				   adder.push_back(actionVarsTime[a]);
+				impliesPosAndNegImpliesOr(solver,currentNullary[n], lastNullary[n], adder);
 
-			vector<int> deleter;
-			for (int d : nullaryDestroyer[n])
-			   deleter.push_back(actionVarsTime[d]);
-			impliesPosAndNegImpliesOr(solver,lastNullary[n], currentNullary[n], deleter);
+				vector<int> deleter;
+				for (int d : nullaryDestroyer[n])
+				   deleter.push_back(actionVarsTime[d]);
+				impliesPosAndNegImpliesOr(solver,lastNullary[n], currentNullary[n], deleter);
+			}
 		}
 		nullary += get_number_of_clauses() - bef;
 		bef = get_number_of_clauses();
 
-
-		if (time){
+		if (time && generateBaseFormula){
 			for (int thisAction : actionVarsTime)
 				impliesOr(solver,thisAction,actionVars.back());
 		}
 
-
-
-
-		actionVars.push_back(actionVarsTime);
-		if (forceActionEveryStep) atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
-		//atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
-		atMostOne(solver,capsule,actionVarsTime);
+		if (generateBaseFormula){
+			actionVars.push_back(actionVarsTime);
+			if (forceActionEveryStep) atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
+			//atLeastOne(solver,capsule,actionVarsTime); // correct for incremental solving
+			atMostOne(solver,capsule,actionVarsTime);
+		}
 		oneAction += get_number_of_clauses() - bef;
 	
 		lastNullary = currentNullary;
@@ -1502,70 +1545,73 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 
 
-
-
 	bef = get_number_of_clauses();
 	// nullary goal
 	int nullaryGoalBlocker = capsule.new_variable();
 	DEBUG(capsule.registerVariable(nullaryGoalBlocker,"nullaryGoalBlocker#" + to_string(planLength)));
-	if (!onlyGenerate) {
-		if (onlyHardConstraints)
-			assertYes(solver,nullaryGoalBlocker);
-		else
-			ipasir_assume(solver,nullaryGoalBlocker);
-	}
 	
-    for (int g : task.goal.positive_nullary_goals)
-		implies(solver,nullaryGoalBlocker,lastNullary[g]);	
-    for (int g : task.goal.negative_nullary_goals)
-		impliesNot(solver,nullaryGoalBlocker,lastNullary[g]);	
+	if (generateBaseFormula){
+		if (!onlyGenerate) {
+			if (onlyHardConstraints)
+				assertYes(solver,nullaryGoalBlocker);
+			else
+				ipasir_assume(solver,nullaryGoalBlocker);
+		}
+		
+	    for (int g : task.goal.positive_nullary_goals)
+			implies(solver,nullaryGoalBlocker,lastNullary[g]);	
+	    for (int g : task.goal.negative_nullary_goals)
+			impliesNot(solver,nullaryGoalBlocker,lastNullary[g]);	
+	}
 	nullary += get_number_of_clauses() - bef;
 	bef = get_number_of_clauses();
 
 
 	// the goal must be achieved!
-	for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
-		const AtomicGoal & goalAtom = task.goal.goal[goal];
-		if (goalAtom.negated) continue; // TODO don't know what to do ...
-		//if (!atom_not_satisfied(s,goalAtom)) continue; // goal is satisfied so we don't have to achieve it via actions
+	if (generateBaseFormula){
+		for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
+			const AtomicGoal & goalAtom = task.goal.goal[goal];
+			if (goalAtom.negated) continue; // TODO don't know what to do ...
+			//if (!atom_not_satisfied(s,goalAtom)) continue; // goal is satisfied so we don't have to achieve it via actions
 
-		ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
-	
-	
-		std::vector<int> goalSupporter;
-		for (int pTime = planLength-1; pTime < planLength; pTime++){
-			int goalSuppVar = goalSupporterVars[goal][pTime+1];
-
-			vector<int> achieverSelection;
-			for (size_t j = 0; j < thisGoalAchievers->achievers.size(); j++){
-				Achiever* achiever = thisGoalAchievers->achievers[j];
-				int achieverVar = capsule.new_variable();
-				achieverSelection.push_back(achieverVar);
-				DEBUG(capsule.registerVariable(achieverVar,	"goalAchieve#" + to_string(goal) + "-" + to_string(pTime) + "_" + to_string(j)));
-
-				// if the achiever has been selected then it must be present!
-				implies(solver,achieverVar,actionVars[pTime][achiever->action]);
-				for (size_t k = 0; k < achiever->params.size(); k++){
-					int myConst = goalAtom.args[k]; // my object (main index)
-					int theirParam = actionArgumentPositions[achiever->action][achiever->params[k]];
-					
-
-					if (theirParam >= 0){
-						implies(solver,achieverVar, parameterVars[pTime][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
-					} // else it is a constant and has already been checked
-				}
-			}
-			impliesOr(solver,goalSuppVar,achieverSelection);
-		}
-	
-		// don't use later support ... These assumptions are cleared after each call
+			ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
 		
-		if (!onlyGenerate){
-			for (size_t time = planLength + 1; time < goalSupporterVars[goal].size(); time++)
-				if (onlyHardConstraints)
-					assertNot(solver,goalSupporterVars[goal][time]);
-				else
-					ipasir_assume(solver,-goalSupporterVars[goal][time]);
+		
+			std::vector<int> goalSupporter;
+			for (int pTime = planLength-1; pTime < planLength; pTime++){
+				int goalSuppVar = goalSupporterVars[goal][pTime+1];
+
+				vector<int> achieverSelection;
+				for (size_t j = 0; j < thisGoalAchievers->achievers.size(); j++){
+					Achiever* achiever = thisGoalAchievers->achievers[j];
+					int achieverVar = capsule.new_variable();
+					achieverSelection.push_back(achieverVar);
+					DEBUG(capsule.registerVariable(achieverVar,	"goalAchieve#" + to_string(goal) + "-" + to_string(pTime) + "_" + to_string(j)));
+
+					// if the achiever has been selected then it must be present!
+					implies(solver,achieverVar,actionVars[pTime][achiever->action]);
+					for (size_t k = 0; k < achiever->params.size(); k++){
+						int myConst = goalAtom.args[k]; // my object (main index)
+						int theirParam = actionArgumentPositions[achiever->action][achiever->params[k]];
+						
+
+						if (theirParam >= 0){
+							implies(solver,achieverVar, parameterVars[pTime][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
+						} // else it is a constant and has already been checked
+					}
+				}
+				impliesOr(solver,goalSuppVar,achieverSelection);
+			}
+		
+			// don't use later support ... These assumptions are cleared after each call
+			
+			if (!onlyGenerate){
+				for (size_t time = planLength + 1; time < goalSupporterVars[goal].size(); time++)
+					if (onlyHardConstraints)
+						assertNot(solver,goalSupporterVars[goal][time]);
+					else
+						ipasir_assume(solver,-goalSupporterVars[goal][time]);
+			}
 		}
 	}
 	goalAchiever += get_number_of_clauses() - bef;
@@ -1573,40 +1619,42 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 
 	// this timestep might disable goal achievers ...
-	for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
-		const AtomicGoal & goalAtom = task.goal.goal[goal];
-		if (goalAtom.negated) continue; // TODO don't know what to do ...
-		//if (!atom_not_satisfied(s,goalAtom)) {
-		//	cout << "GOAL already satisfied in init ... we have not implemeted this ... " << endl;
-		//	//exit(0);	
-		//}
+	if (generateBaseFormula){
+		for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
+			const AtomicGoal & goalAtom = task.goal.goal[goal];
+			if (goalAtom.negated) continue; // TODO don't know what to do ...
+			//if (!atom_not_satisfied(s,goalAtom)) {
+			//	cout << "GOAL already satisfied in init ... we have not implemeted this ... " << endl;
+			//	//exit(0);	
+			//}
 
-		ActionPrecAchiever* thisGoalDestroyers = goalAchievers->precAchievers[goal];
-	
-	
-		std::vector<int> goalSupporter;
-		// from the beginning ... 
-		for (int pTime = 0; pTime <= planLength; pTime++){
-			int goalSuppVar = goalSupporterVars[goal][pTime];
+			ActionPrecAchiever* thisGoalDestroyers = goalAchievers->precAchievers[goal];
+		
+		
+			std::vector<int> goalSupporter;
+			// from the beginning ... 
+			for (int pTime = 0; pTime <= planLength; pTime++){
+				int goalSuppVar = goalSupporterVars[goal][pTime];
 
-			for (size_t j = 0; j < thisGoalDestroyers->destroyers.size(); j++){
-				Achiever* destroyer = thisGoalDestroyers->destroyers[j];
-				
-				vector<int> criticalVars;
-				criticalVars.push_back(actionVars[planLength-1][destroyer->action]);
+				for (size_t j = 0; j < thisGoalDestroyers->destroyers.size(); j++){
+					Achiever* destroyer = thisGoalDestroyers->destroyers[j];
+					
+					vector<int> criticalVars;
+					criticalVars.push_back(actionVars[planLength-1][destroyer->action]);
 
-				for (size_t k = 0; k < destroyer->params.size(); k++){
-					int myConst = goalAtom.args[k]; // my object (main index)
-					int theirParam = actionArgumentPositions[destroyer->action][destroyer->params[k]];
+					for (size_t k = 0; k < destroyer->params.size(); k++){
+						int myConst = goalAtom.args[k]; // my object (main index)
+						int theirParam = actionArgumentPositions[destroyer->action][destroyer->params[k]];
 
-					if (theirParam >= 0){
-						criticalVars.push_back(parameterVars[planLength-1][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
-					} // else it is a constant and has already been checked
+						if (theirParam >= 0){
+							criticalVars.push_back(parameterVars[planLength-1][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
+						} // else it is a constant and has already been checked
+					}
+
+					criticalVars.push_back(goalSuppVar);
+					set<int> temp(criticalVars.begin(), criticalVars.end());
+					notAll(solver,temp);
 				}
-
-				criticalVars.push_back(goalSuppVar);
-				set<int> temp(criticalVars.begin(), criticalVars.end());
-				notAll(solver,temp);
 			}
 		}
 	}
@@ -1699,13 +1747,14 @@ bool liftedRP::compute_heuristic_sat(const DBState &s, const Task &task, const s
 
 int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 	if (satMode){
-		int maxLen = 100;
-
-		bool satisficing = false;
+		bool satisficing = true;
 
 		if (satisficing){
 			DEBUG(cout << "Parameter arity " << maxArity << " Objects " << task.objects.size() << endl);
 			// start the incremental search for a plan	
+			void* solver = ipasir_init();
+			sat_capsule capsule;
+			
 			for (int pastLimit = 1; pastLimit < maxLen + 1; pastLimit++){
 				// reset formula size counters
 				actionTyping = 0;
@@ -1727,68 +1776,67 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 				cout << "Past Limit " << pastLimit << endl;
 			
 				std::clock_t start = std::clock();
-				void* solver = ipasir_init();
-				sat_capsule capsule;
 				reset_number_of_clauses();
 				int maxPlanLength = maxLen + 2;
 				solverTotal = 0;
 
-				goalSupporterVars.clear();
-				parameterVars.clear();
-				initNotTrueAfter.clear();
-				actionVars.clear();
+				//goalSupporterVars.clear();
+				//parameterVars.clear();
+				//initNotTrueAfter.clear();
+				//actionVars.clear();
 
-				// the goal must be achieved!
-				int gc = 0;
-				for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
-					const AtomicGoal & goalAtom = task.goal.goal[goal];
-					std::vector<int> goalSupporter;
+				if (pastLimit == 1){
+					// the goal must be achieved!
+					int gc = 0;
+					for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
+						const AtomicGoal & goalAtom = task.goal.goal[goal];
+						std::vector<int> goalSupporter;
+						
+						if (goalAtom.negated) {
+							goalSupporterVars.push_back(goalSupporter);
+							continue; // TODO don't know what to do ...
+						}
+						gc++;
+	
+						//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
 					
-					if (goalAtom.negated) {
+						for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
+							int goalSuppVar = capsule.new_variable();
+							goalSupporter.push_back(goalSuppVar);
+							DEBUG(capsule.registerVariable(goalSuppVar, "goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
+	
+						}
+						if (atom_not_satisfied(s,goalAtom)) assertNot(solver,goalSupporter[0]);	
+						
+						atLeastOne(solver,capsule,goalSupporter);
 						goalSupporterVars.push_back(goalSupporter);
-						continue; // TODO don't know what to do ...
 					}
-					gc++;
-	
-					//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
-				
-					for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
-						int goalSuppVar = capsule.new_variable();
-						goalSupporter.push_back(goalSuppVar);
-						DEBUG(capsule.registerVariable(goalSuppVar, "goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
-	
-					}
-					if (atom_not_satisfied(s,goalAtom)) assertNot(solver,goalSupporter[0]);	
+
+					// we only test executable plans and if the goal is a dead end ...
+					if (!gc) return 0;
+
 					
-					atLeastOne(solver,capsule,goalSupporter);
-					goalSupporterVars.push_back(goalSupporter);
+					for (int n : task.nullary_predicates){
+						int nullaryInInit = capsule.new_variable();
+						lastNullary[n] = nullaryInInit;
+						DEBUG(capsule.registerVariable(nullaryInInit,
+									"nullary#" + to_string(n) + "_" + to_string(-1)));
+
+						if (s.get_nullary_atoms()[n])
+							assertYes(solver,nullaryInInit);
+						else
+							assertNot(solver,nullaryInInit);
+					}
 				}
-
-				// we only test executable plans and if the goal is a dead end ...
-				if (!gc) return 0;
-
-				
-				for (int n : task.nullary_predicates){
-					int nullaryInInit = capsule.new_variable();
-					lastNullary[n] = nullaryInInit;
-					DEBUG(capsule.registerVariable(nullaryInInit,
-								"nullary#" + to_string(n) + "_" + to_string(-1)));
-
-					if (s.get_nullary_atoms()[n])
-						assertYes(solver,nullaryInInit);
-					else
-						assertNot(solver,nullaryInInit);
-				}
-
 
 			
 				planLength = 0;
 				while (planLength < maxLen){
 					planLength++;
-					compute_heuristic_sat(s,task,start,solver,capsule,true,false,true,pastLimit);
+					compute_heuristic_sat(s,task,start,solver,capsule,true,false,true,true,pastLimit);
 				}
 				planLength++;
-				if (compute_heuristic_sat(s,task,start,solver,capsule,false,false,true,pastLimit)){
+				if (compute_heuristic_sat(s,task,start,solver,capsule,false,false,true,true,pastLimit)){
 					ipasir_release(solver);
 					cout << "\t\tPlan of length: " << planLength << endl;
 					DEBUG(cout << "\t\tPlan of length: " << planLength << endl);
@@ -1805,7 +1853,7 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 						return planLength + 1;
 					}
 				}
-				ipasir_release(solver);
+				//ipasir_release(solver);
 			}
 		} else {
 			std::clock_t start = std::clock();
@@ -1870,11 +1918,11 @@ int liftedRP::compute_heuristic(const DBState &s, const Task &task) {
 				if (!linearIncrease)
 					while (planLength < (1 << i)-1){
 						planLength++;
-						compute_heuristic_sat(s,task,start,solver,capsule,true,false,false);
+						compute_heuristic_sat(s,task,start,solver,capsule,true,false,false,false);
 					}
 				
 				planLength++;
-				if (compute_heuristic_sat(s,task,start,solver,capsule,false,linearIncrease,false)){
+				if (compute_heuristic_sat(s,task,start,solver,capsule,false,linearIncrease,false,false)){
 					ipasir_release(solver);
 					cout << "\t\tPlan of length: " << planLength << endl;
 					DEBUG(cout << "\t\tPlan of length: " << planLength << endl);

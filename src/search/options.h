@@ -15,6 +15,7 @@ class Options {
     std::string state_representation;
     std::string datalog_file;
     unsigned seed;
+	unsigned int planLength;
 
 public:
     Options(int argc, char** argv) {
@@ -28,6 +29,7 @@ public:
             ("search,s", po::value<std::string>()->required(), "Search engine.")
             ("state-representation,r", po::value<std::string>()->default_value("sparse"), "State representation.")
             ("datalog-file", po::value<std::string>()->default_value("FilePathUndefined"), "Datalog model file.")
+            ("planLength,l", po::value<unsigned>()->default_value(100), "Plan length for the SAT encoding")
             ;
 
         po::variables_map vm;
@@ -53,7 +55,7 @@ public:
         state_representation = vm["state-representation"].as<std::string>();
         datalog_file = vm["datalog-file"].as<std::string>();
         seed = vm["seed"].as<unsigned>();
-
+        planLength = vm["planLength"].as<unsigned int>();
     }
 
     const std::string &get_filename() const {
@@ -82,6 +84,10 @@ public:
 
     unsigned get_seed() const {
         return seed;
+    }
+
+    unsigned int get_planLength() const {
+        return planLength;
     }
 
 

@@ -33,7 +33,7 @@ Heuristic *HeuristicFactory::create(const Options &opt, const Task &task)
         return new LiftedHeuristic(task, datalog_file, lifted_heuristic::H_MAX);
     }
     else if (boost::iequals(method, "hlrp")) {
-        return new liftedRP(task);
+        return new liftedRP(task, opt.get_planLength());
     }
     else {
         std::cerr << "Invalid heuristic \"" << method << "\"" << std::endl;

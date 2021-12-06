@@ -44,7 +44,9 @@ private:
     int maxArity = -1;
     int maxPrec = -1;
 
-    int numObjs = -1;
+	int maxLen;
+    
+	int numObjs = -1;
     int numActions = -1;
 
     int* lowerTindex;
@@ -75,10 +77,10 @@ private:
     int sortObjs(int index, int type);
 public:
 
-    liftedRP(const Task task);
+    liftedRP(const Task task, int limit);
 
     int compute_heuristic(const DBState & s, const Task& task) final;
-	bool compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & start, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, int pastLimit = 10000);
+	bool compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & start, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, bool pastIncremental, int pastLimit = 10000);
 	bool atom_not_satisfied(const DBState &s, const AtomicGoal &atomicGoal) const;
 
     int actionID(int i);
