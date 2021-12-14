@@ -1599,12 +1599,27 @@ bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTim
 					implies(solver,achieverVar,actionVars[pTime][achiever->action]);
 					for (size_t k = 0; k < achiever->params.size(); k++){
 						int myConst = goalAtom.args[k]; // my object (main index)
-						int theirParam = actionArgumentPositions[achiever->action][achiever->params[k]];
+						if (achiever->params[k] < 0){
+							if (myConst != -achiever->params[k]-1)
+								assertNot(solver,achieverVar);
 						
+							continue;
+						} else {
+							int theirParam = actionArgumentPositions[achiever->action][achiever->params[k]];
+							//cout << "param K " << achiever->params[k] << endl;
+							if (theirParam >= 0){
+								int constIdx = objToIndex[myConst];
+								int lower = lowerTindex[typeOfArgument[theirParam]];
+								int upper = upperTindex[typeOfArgument[theirParam]];
 
-						if (theirParam >= 0){
-							implies(solver,achieverVar, parameterVars[pTime][theirParam][objToIndex[myConst] - lowerTindex[typeOfArgument[theirParam]]]);
-						} // else it is a constant and has already been checked
+								//cout << "Goal #"  << goal << " achiever " << j << " parameter " << k << " theirParam " << theirParam << " const " << constIdx << " " << lower << " " << upper << endl;
+
+								if (constIdx < lower || constIdx > upper)
+									assertNot(solver, achieverVar);
+								else
+									implies(solver,achieverVar, parameterVars[pTime][theirParam][constIdx - lower]);
+							} // else it is a constant and has already been checked
+						}
 					}
 				}
 				impliesOr(solver,goalSuppVar,achieverSelection);
