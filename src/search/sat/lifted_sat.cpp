@@ -784,8 +784,8 @@ bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTim
 								int myType = task.actions[action].get_parameters()[myParam].type;
 								int theirType = task.actions[achiever->action].get_parameters()[theirParam].type; 
 
-								int lower = max(lowerTindex[myType],lowerTindex[theirType]);
-				                int upper = min(upperTindex[myType],upperTindex[theirType]);
+								int lower = min(lowerTindex[myType],lowerTindex[theirType]);
+				                int upper = max(upperTindex[myType],upperTindex[theirType]);
 								//cout << myParam << " " << theirParam << " " << upper - lower + 1 << endl;
 			
 								if (lowerTindex[myType] != lowerTindex[theirType] || upperTindex[myType] != upperTindex[theirType]){
@@ -1387,14 +1387,14 @@ bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTim
 
 										// then only one value is actually possible to we know that equality holds!
 										theirParam = actionArgumentPositions[achiever->action][theirParam];
-										if (lower != upper){
-											if (!allDifferentActions){
-												implies(solver,achieverVar,parameterEquality[time][myParam][i-1][theirParam]);
-											}
-											else {
-												andImplies(solver,actionVar,precSupporter[time][prec][i],achieverVar,parameterEquality[time][myParam][i-1][theirParam]);
-											}
+										//if (lower != upper){
+										if (!allDifferentActions){
+											implies(solver,achieverVar,parameterEquality[time][myParam][i-1][theirParam]);
 										}
+										else {
+											andImplies(solver,actionVar,precSupporter[time][prec][i],achieverVar,parameterEquality[time][myParam][i-1][theirParam]);
+										}
+										//}
 									}
 								} else {
 									// my param is a const
