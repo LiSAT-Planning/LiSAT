@@ -16,6 +16,7 @@ class Options {
     std::string datalog_file;
     unsigned seed;
 	unsigned int planLength;
+	bool optimal;
 
 public:
     Options(int argc, char** argv) {
@@ -24,12 +25,13 @@ public:
             ("filename,f", po::value<std::string>()->default_value("output.lifted"), "Lifted task file name.")
             ("help,h", "Display this help message.")
             ("seed", po::value<unsigned>()->default_value(1), "Random seed.")
-            ("evaluator,e", po::value<std::string>()->required(), "Heuristic evaluator.")
-            ("generator,g", po::value<std::string>()->required(), "Successor generator method.")
+            ("evaluator,e", po::value<std::string>()->default_value("goalcount"), "Heuristic evaluator.")
+            ("generator,g", po::value<std::string>()->default_value("yannakakis"), "Successor generator method.")
             ("search,s", po::value<std::string>()->required(), "Search engine.")
             ("state-representation,r", po::value<std::string>()->default_value("sparse"), "State representation.")
             ("datalog-file", po::value<std::string>()->default_value("FilePathUndefined"), "Datalog model file.")
             ("planLength,l", po::value<unsigned>()->default_value(100), "Plan length for the SAT encoding")
+            ("optimal,o", "Run the SAT planner in optimal mode")
             ;
 
         po::variables_map vm;
@@ -56,6 +58,7 @@ public:
         datalog_file = vm["datalog-file"].as<std::string>();
         seed = vm["seed"].as<unsigned>();
         planLength = vm["planLength"].as<unsigned int>();
+        optimal = vm.count("optimal");
     }
 
     const std::string &get_filename() const {
@@ -88,6 +91,10 @@ public:
 
     unsigned int get_planLength() const {
         return planLength;
+    }
+
+    unsigned int get_optimal() const {
+        return optimal;
     }
 
 

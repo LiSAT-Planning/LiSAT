@@ -2,7 +2,6 @@
 
 #include "blind_heuristic.h"
 #include "goalcount.h"
-#include "liftedRP.h"
 
 #include "../lifted_heuristic/lifted_heuristic.h"
 
@@ -31,9 +30,6 @@ Heuristic *HeuristicFactory::create(const Options &opt, const Task &task)
     }
     else if (boost::iequals(method, "hmax")) {
         return new LiftedHeuristic(task, datalog_file, lifted_heuristic::H_MAX);
-    }
-    else if (boost::iequals(method, "hlrp")) {
-        return new liftedRP(task, opt.get_planLength());
     }
     else {
         std::cerr << "Invalid heuristic \"" << method << "\"" << std::endl;

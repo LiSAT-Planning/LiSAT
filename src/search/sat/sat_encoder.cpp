@@ -24,7 +24,7 @@ std::string path_string_no_sep(std::vector<int> & path){
 }
 
 std::string pad_string(std::string s, int chars){
-	while (s.size() < chars)
+	while (int(s.size()) < chars)
 		s += " ";
 	return s;
 }
@@ -253,7 +253,7 @@ void atMostOne(void* solver, sat_capsule & capsule, std::vector<int> & is){
 
 void atMostK(void* solver, sat_capsule & capsule, int K, std::vector<int> & is){
 	std::vector<int> vars;
-	for (int x = 0; x < is.size(); x++){
+	for (int x = 0; x < int(is.size()); x++){
 		vars.push_back(capsule.new_variable());
 		for (int i = 1; i <= K+1; i++)
 			capsule.new_variable(); // id will not be needed
@@ -264,7 +264,7 @@ void atMostK(void* solver, sat_capsule & capsule, int K, std::vector<int> & is){
 		capsule.new_variable(); // id will not be needed
 
 
-	for (int i = 0; i < is.size(); i++){
+	for (int i = 0; i < int(is.size()); i++){
 		for (int j = 0; j <= K; j++){
 			ipasir_add(solver,-is[i]);
 			ipasir_add(solver,-(vars[i] + j));

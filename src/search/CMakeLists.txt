@@ -104,10 +104,10 @@ add_executable(search
         lifted_heuristic/rule_matcher.cc lifted_heuristic/rule_matcher.h
         lifted_heuristic/grounders/grounder.h
         lifted_heuristic/grounders/weighted_grounder.cc lifted_heuristic/grounders/weighted_grounder.h search_engines/lazy_search.cc search_engines/lazy_search.h
-		heuristics/liftedRP.cpp heuristics/liftedRP.h
-		heuristics/sat_encoder.cpp heuristics/sat_encoder.h
-		heuristics/ipasir.h
-		#heuristics/kissat.h heuristics/kissat.cpp
+		sat/lifted_sat.cpp sat/lifted_sat.h
+		sat/sat_encoder.cpp sat/sat_encoder.h
+		sat/ipasir.h
+		sat/kissat.h sat/kissat.cpp
 		)
 
 add_library(cplex SHARED IMPORTED)
@@ -130,8 +130,8 @@ set_target_properties(concert  PROPERTIES
 
 target_link_options(search PUBLIC ${linker_flags})
 
-target_link_libraries(search PRIVATE ipasircryptominisat5)
-#target_link_libraries(search PRIVATE kissat)
+#target_link_libraries(search PRIVATE ipasircryptominisat5)
+target_link_libraries(search PRIVATE kissat)
 
 target_link_libraries(search PRIVATE ilocplex)
 target_link_libraries(search PRIVATE concert)

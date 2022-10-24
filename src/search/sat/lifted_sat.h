@@ -2,14 +2,16 @@
 // Created by dh on 27.08.21.
 //
 
-#ifndef SEARCH_LIFTEDRP_H
-#define SEARCH_LIFTEDRP_H
+#ifndef SEARCH_LIFTE_SAT_H
+#define SEARCH_LIFTE_SAT_H
 
 #include <ilcplex/ilocplex.h>
 #include <vector>
 #include <unordered_set>
-#include "heuristic.h"
+#include <unordered_map>
 #include "sat_encoder.h"
+#include "../utils/system.h"
+#include "../task.h"
 
 struct Achiever {
     // the precondition "pred p0 p1 p3"
@@ -36,7 +38,7 @@ struct ActionPrecAchievers {
     std::map<int, ActionPrecAchiever*> negNullaryPrecAchievers;
 };
 
-class liftedRP : public Heuristic {
+class LiftedSAT{
 private:
 	std::map<std::pair<int, int>, bool> needToType;
     const int largeC = 100000;
@@ -77,10 +79,9 @@ private:
     int sortObjs(int index, int type);
 public:
 
-    liftedRP(const Task task, int limit);
-
-    int compute_heuristic(const DBState & s, const Task& task) final;
-	bool compute_heuristic_sat(const DBState &s, const Task &task, const std::clock_t & start, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, bool pastIncremental, int pastLimit = 10000);
+    LiftedSAT(const Task& task);
+	utils::ExitCode solve(const Task& task, int limit, bool optimal);
+	bool generate_formula(const Task &task, const std::clock_t & start, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, bool pastIncremental, int pastLimit = 10000);
 	bool atom_not_satisfied(const DBState &s, const AtomicGoal &atomicGoal) const;
 
     int actionID(int i);
