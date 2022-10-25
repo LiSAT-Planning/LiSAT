@@ -24,20 +24,21 @@ def parse_options():
     parser.add_argument('--debug', dest='debug', action='store_true',
                         help='Run planner in debug mode.')
     parser.add_argument('-s', '--search', dest='search', action='store',
-                        default=None, help='Search algorithm', choices=("naive", "bfs", "gbfs", "lazy", "lazy-po", "lazy-prune"),
+                        default=None, help='Search algorithm', choices=("naive", "bfs", "gbfs", "lazy", "lazy-po", "lazy-prune", "sat"),
                         required=True)
     parser.add_argument('-e', '--heuristic', dest='heuristic', action='store',
                         default=None, choices=("blind", "goalcount", "add", "hmax"),
-                        help='Heuristic to guide the search (ignore in case of blind search)',
-                        required=True)
+                        help='Heuristic to guide the search (ignore in case of blind search)')
     parser.add_argument('-g', '--generator', dest='generator', action='store',
                         default=None, help='Successor generator method',
-                        choices=('yannakakis', 'join', 'random_join', 'ordered_join', 'inverse_ordered_join', 'full_reducer'),
-                        required=True)
+                        choices=('yannakakis', 'join', 'random_join', 'ordered_join', 'inverse_ordered_join', 'full_reducer'))
     parser.add_argument('--state', action='store', help='Successor generator method',
                         default="sparse", choices=("sparse", "extensional"))
     parser.add_argument('--seed', action='store', help='Random seed.',
                         default=1)
+    parser.add_argument('-l', '--planLength', action='store', help='Plan length for the SAT encoding', default=100)
+    parser.add_argument('-o', '--optimal', action="store_true", help="Run the SAT planner in optimal mode")
+    parser.add_argument('-I', '--incremental', action="store_true", help="Run the SAT planner in incremental mode\nATTENTION: this is not supported by all SAT solvers.")
     parser.add_argument('--translator-output-file', dest='translator_file',
                         default='output.lifted',
                         help='Output file of the translator')
@@ -147,16 +148,30 @@ def main():
                     PYTHON_EXTRA_OPTIONS)
 
 
+    if options.search != 'sat':
+        # Invoke the C++ search component
+        cmd = [os.path.join(build_dir, 'search', 'search'),
+               '-f', options.translator_file,
+               '-s', options.search,
+               '-e', options.heuristic,
+               '-g', options.generator,
+               '-r', options.state,
+               '--seed', str(options.seed)]
+    else:
+        # Invoke the C++ search component
+        cmd = [os.path.join(build_dir, 'search', 'search'),
+               '-f', options.translator_file,
+               '-s', options.search,
+               '-l', str(options.planLength),
+               '--seed', str(options.seed)]
+        if options.optimal:
+            cmd.append('-o')
+        if options.incremental:
+            cmd.append('-i')
 
-    # Invoke the C++ search component
-    cmd = [os.path.join(build_dir, 'search', 'search'),
-           '-f', options.translator_file,
-           '-s', options.search,
-           '-e', options.heuristic,
-           '-g', options.generator,
-           '-r', options.state,
-           '--seed', str(options.seed)] + \
-           CPP_EXTRA_OPTIONS
+    cmd = cmd + \
+               CPP_EXTRA_OPTIONS
+
 
     print(f'Executing "{" ".join(cmd)}"')
     code = subprocess.call(cmd)
