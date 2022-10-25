@@ -49,7 +49,7 @@ int main(int argc, char *argv[]) {
 	if (opt.get_search_engine() == "sat"){
         std::unique_ptr<LiftedSAT> liftedSAT(new LiftedSAT(task));
     	try {
-    	    auto exitcode = liftedSAT->solve(task,opt.get_planLength(), opt.get_optimal());
+    	    auto exitcode = liftedSAT->solve(task,opt.get_planLength(), opt.get_optimal(), opt.get_incremental());
     	    utils::report_exit_code_reentrant(exitcode);
     	    return static_cast<int>(exitcode);
     	}

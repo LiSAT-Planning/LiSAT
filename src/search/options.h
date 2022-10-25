@@ -17,6 +17,7 @@ class Options {
     unsigned seed;
 	unsigned int planLength;
 	bool optimal;
+	bool incremental;
 
 public:
     Options(int argc, char** argv) {
@@ -32,6 +33,7 @@ public:
             ("datalog-file", po::value<std::string>()->default_value("FilePathUndefined"), "Datalog model file.")
             ("planLength,l", po::value<unsigned>()->default_value(100), "Plan length for the SAT encoding")
             ("optimal,o", "Run the SAT planner in optimal mode")
+            ("incremental,i", "Run the SAT planner in incremenal mode. ATTENTION: this is not supported by all SAT solvers")
             ;
 
         po::variables_map vm;
@@ -59,6 +61,7 @@ public:
         seed = vm["seed"].as<unsigned>();
         planLength = vm["planLength"].as<unsigned int>();
         optimal = vm.count("optimal");
+        incremental = vm.count("incremental");
     }
 
     const std::string &get_filename() const {
@@ -95,6 +98,10 @@ public:
 
     unsigned int get_optimal() const {
         return optimal;
+    }
+
+    unsigned int get_incremental() const {
+        return incremental;
     }
 
 

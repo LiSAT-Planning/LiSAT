@@ -738,7 +738,21 @@ int goalAchiever = 0;
 int goalDeleter = 0; 
 
 
-bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, bool pastIncremental, int pastLimit) {
+
+// Generator function for the formula.
+// This function generates *one* time step of the formula
+// assumes that the number of the currently to generated time step is stored in the member variable planLength
+//
+// The semantics of the argument flags is as follows:
+//
+// onlyGenerate - true -> only generate the formula but do not attempt to solve it yet.
+// forceActionEveryStep - true -> every timestep must contain an action
+// onlyHardConstraints - true -> generate the formula with hard constraint clauses
+//                       false -> generate the formula with assumptions instead of hard constraints
+// pastIncremental - true -> we are in an incremental run over the ACD
+
+bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule,
+		bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, bool pastIncremental, int pastLimit) {
 	//for (size_t action = 0; action < task.actions.size(); action++){
 	//	for (size_t param = 0; param < task.actions[action].get_parameters().size(); param++){
 	//		int myType = task.actions[action].get_parameters()[param].type;
@@ -838,7 +852,7 @@ bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTim
 	int bef = get_number_of_clauses();
 	// indices: timestep -> parameter -> object
 	for (int time = planLength-1; time < planLength; time++){
-		cout << "Generating time = " << time << " past limit = " << pastLimit << endl;
+		cout << "Generating time = " << setw(3) << time << " past limit = " << setw(7) << pastLimit << endl;
 
 		// generate nullary variables
 		std::unordered_map<int,int> currentNullary;
@@ -1382,8 +1396,8 @@ bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTim
 										int myType = task.actions[action].get_parameters()[precObjec.arguments[k].index].type;
 										int theirType = task.actions[achiever->action].get_parameters()[theirParam].type; 
 										
-										int lower = min(lowerTindex[myType],lowerTindex[theirType]);
-						                int upper = max(upperTindex[myType],upperTindex[theirType]);
+										//int lower = min(lowerTindex[myType],lowerTindex[theirType]);
+						                //int upper = max(upperTindex[myType],upperTindex[theirType]);
 
 										// then only one value is actually possible to we know that equality holds!
 										theirParam = actionArgumentPositions[achiever->action][theirParam];
@@ -1683,10 +1697,10 @@ bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTim
 	goalDeleter += get_number_of_clauses() - bef;
 	bef = get_number_of_clauses();
 
-
 	if (onlyGenerate) return false;
 
-	cout << "Generated Variables " << capsule.number_of_variables << " Clauses: " << get_number_of_clauses() << " length " << planLength << endl;
+	cout << "Generated Variables " << setw(10) << capsule.number_of_variables <<
+		" Clauses: " << setw(10) << get_number_of_clauses() << " length " << planLength << endl;
 	cout << "\tone action         " << setw(9) << oneAction << endl; 
 	cout << "\tmax 1 param value  " << setw(9) << atMostOneParamterValue << endl;
 	cout << "\tinit maintain      " << setw(9) << variableInitMaintenance << endl;
@@ -1767,10 +1781,9 @@ bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTim
 
 
 
-utils::ExitCode LiftedSAT::solve(const Task &task, int limit, bool optimal) {
+utils::ExitCode LiftedSAT::solve(const Task &task, int limit, bool optimal, bool incremental) {
     maxLen = limit;
 	bool satisficing = !optimal;
-	bool incremental = false;
 
 	if (satisficing){
 		DEBUG(cout << "Parameter arity " << maxArity << " Objects " << task.objects.size() << endl);
@@ -1785,29 +1798,31 @@ utils::ExitCode LiftedSAT::solve(const Task &task, int limit, bool optimal) {
 				solver = ipasir_init();
 				capsule.number_of_variables = 0;
 				DEBUG(capsule.variableNames.clear());
-			}
-			// reset formula size counters
-			actionTyping = 0;
-			atMostOneParamterValue = 0;
-			variableInitMaintenance = 0;
-			precSupport = 0;
-			equals = 0;
-			initSupp = 0;
-			nullary = 0;
-			equalsPrecs = 0; 
-			achieverImplications = 0; 
-			noDeleter = 0; 
-			oneAction = 0; 
-			goalAchiever = 0; 
-			goalDeleter = 0; 
+				reset_number_of_clauses();
 
+
+				// reset formula size counters
+				actionTyping = 0;
+				atMostOneParamterValue = 0;
+				variableInitMaintenance = 0;
+				precSupport = 0;
+				equals = 0;
+				initSupp = 0;
+				nullary = 0;
+				equalsPrecs = 0; 
+				achieverImplications = 0; 
+				staticInitSupp = 0;
+				noDeleter = 0; 
+				oneAction = 0; 
+				goalAchiever = 0; 
+				goalDeleter = 0; 
+			}
 
 			
-			cout << endl << "Maximum Achiever Consumer Distance (ACD) " << pastLimit << endl;
-			cout << "====================================================" << pastLimit << endl;
+			cout << endl << "Maximum Achiever Consumer Distance (ACD) " << setw(5) << pastLimit << endl;
+			cout << "===================================================="  << endl;
 		
 			std::clock_t start = std::clock();
-			reset_number_of_clauses();
 			int maxPlanLength = maxLen + 2;
 			solverTotal = 0;
 
@@ -1892,69 +1907,113 @@ utils::ExitCode LiftedSAT::solve(const Task &task, int limit, bool optimal) {
 				ipasir_release(solver);
 		}
 	} else {
+		void* solver;
+		sat_capsule capsule;
+		if (incremental){
+			solver = ipasir_init();
+			planLength = 0;
+		}
+		
 		for (int i = 0; i < maxLen; i++){
+			if (!incremental) {// create a new solver instance for every ACD
+				solver = ipasir_init();
+				capsule.number_of_variables = 0;
+				DEBUG(capsule.variableNames.clear());
+				reset_number_of_clauses();
+
+
+				// reset formula size counters
+				actionTyping = 0;
+				atMostOneParamterValue = 0;
+				variableInitMaintenance = 0;
+				precSupport = 0;
+				equals = 0;
+				initSupp = 0;
+				nullary = 0;
+				equalsPrecs = 0; 
+				staticInitSupp = 0;
+				achieverImplications = 0; 
+				noDeleter = 0; 
+				oneAction = 0; 
+				goalAchiever = 0; 
+				goalDeleter = 0; 
+			}
+
 			std::clock_t start = std::clock();
-			void* solver = ipasir_init();
-			sat_capsule capsule;
-			reset_number_of_clauses();
 			int maxPlanLength = maxLen + 5;
 			solverTotal = 0;
 
-			goalSupporterVars.clear();
-			parameterVars.clear();
-			actionVars.clear();
-			parameterEquality.clear();
-			precSupporter.clear();
-			precSupporterOver.clear();
-			lastNullary.clear();
-			initNotTrueAfter.clear();
-
-			// the goal must be achieved!
-			int gc = 0;
-			for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
-				const AtomicGoal & goalAtom = task.goal.goal[goal];
-				std::vector<int> goalSupporter;
-				
-				if (goalAtom.negated) {
-					goalSupporterVars.push_back(goalSupporter);
-					continue; // TODO don't know what to do ...
-				}
-				gc++;
-
-				//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
-			
-				for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
-					int goalSuppVar = capsule.new_variable();
-					goalSupporter.push_back(goalSuppVar);
-					DEBUG(capsule.registerVariable(goalSuppVar,
-								"goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
-
-				}
-				if (atom_not_satisfied(task.initial_state,goalAtom)) assertNot(solver,goalSupporter[0]);	
-				
-				atLeastOne(solver,capsule,goalSupporter);
-				goalSupporterVars.push_back(goalSupporter);
+			if (!incremental){
+				goalSupporterVars.clear();
+				parameterVars.clear();
+				actionVars.clear();
+				parameterEquality.clear();
+				precSupporter.clear();
+				precSupporterOver.clear();
+				lastNullary.clear();
+				initNotTrueAfter.clear();
 			}
+			
+			
+			// initialise 0-ary predicates either every time we run or once for incremental solving
+			if (!incremental || i == 0){
 
-			// we only test executable plans and if the goal is a dead end ...
-			if (!gc) return utils::ExitCode::SEARCH_UNSOLVABLE;
+				// the goal must be achieved!
+				int gc = 0;
+				int clausesBefore = get_number_of_clauses();
+				for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
+					const AtomicGoal & goalAtom = task.goal.goal[goal];
+					std::vector<int> goalSupporter;
+					
+					if (goalAtom.negated) {
+						goalSupporterVars.push_back(goalSupporter);
+						continue; // TODO don't know what to do ...
+					}
+					gc++;
+
+					//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
+				
+					for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
+						int goalSuppVar = capsule.new_variable();
+						goalSupporter.push_back(goalSuppVar);
+						DEBUG(capsule.registerVariable(goalSuppVar,
+									"goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
+
+					}
+					if (atom_not_satisfied(task.initial_state,goalAtom)) assertNot(solver,goalSupporter[0]);	
+					
+					atLeastOne(solver,capsule,goalSupporter);
+					goalSupporterVars.push_back(goalSupporter);
+				}
+				goalAchiever += get_number_of_clauses() - clausesBefore;
+				clausesBefore = get_number_of_clauses();
+
+				// we only test executable plans and if the goal is a dead end ...
+				if (!gc) return utils::ExitCode::SEARCH_UNSOLVABLE;
 
 			
-			for (int n : task.nullary_predicates){
-				int nullaryInInit = capsule.new_variable();
-				lastNullary[n] = nullaryInInit;
-				DEBUG(capsule.registerVariable(nullaryInInit,
-							"nullary#" + to_string(n) + "_" + to_string(-1)));
+				for (int n : task.nullary_predicates){
+					int nullaryInInit = capsule.new_variable();
+					lastNullary[n] = nullaryInInit;
+					DEBUG(capsule.registerVariable(nullaryInInit,
+								"nullary#" + to_string(n) + "_" + to_string(-1)));
 
-				if (task.initial_state.get_nullary_atoms()[n])
-					assertYes(solver,nullaryInInit);
-				else
-					assertNot(solver,nullaryInInit);
+					if (task.initial_state.get_nullary_atoms()[n])
+						assertYes(solver,nullaryInInit);
+					else
+						assertNot(solver,nullaryInInit);
+				}
+				nullary += get_number_of_clauses() - clausesBefore;
 			}
 
 
 			// start the incremental search for a plan	
-			planLength = 0;
+			
+			
+			// if not in incremental mode, we need to generate the formula for all timesteps.
+			if (!incremental)
+				planLength = 0;
+			
 			bool linearIncrease = true;
 			if (!linearIncrease){
 				while (planLength < (1 << i)-1){
@@ -1964,7 +2023,7 @@ utils::ExitCode LiftedSAT::solve(const Task &task, int limit, bool optimal) {
 			} else {
 				while (planLength < i){
 					planLength++;
-					generate_formula(task,start,solver,capsule,true,false,false,false);
+					generate_formula(task,start,solver,capsule,true,true,false,false);
 				}
 			}
 			

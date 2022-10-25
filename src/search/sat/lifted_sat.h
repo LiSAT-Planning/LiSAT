@@ -80,7 +80,7 @@ private:
 public:
 
     LiftedSAT(const Task& task);
-	utils::ExitCode solve(const Task& task, int limit, bool optimal);
+	utils::ExitCode solve(const Task& task, int limit, bool optimal, bool incremental);
 	bool generate_formula(const Task &task, const std::clock_t & start, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, bool pastIncremental, int pastLimit = 10000);
 	bool atom_not_satisfied(const DBState &s, const AtomicGoal &atomicGoal) const;
 
