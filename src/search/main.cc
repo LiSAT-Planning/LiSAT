@@ -2,7 +2,11 @@
 #include "parser.h"
 #include "task.h"
 
+#ifndef CMAKE_NO_SAT
 #include "sat/lifted_sat.h"
+#endif
+
+
 #include "heuristics/heuristic.h"
 #include "heuristics/heuristic_factory.h"
 #include "search_engines/search.h"
@@ -47,6 +51,7 @@ int main(int argc, char *argv[]) {
 
 
 	if (opt.get_search_engine() == "sat"){
+#ifndef CMAKE_NO_SAT
         std::unique_ptr<LiftedSAT> liftedSAT(new LiftedSAT(task));
     	try {
     	    auto exitcode = liftedSAT->solve(task,opt.get_planLength(), opt.get_optimal(), opt.get_incremental());
@@ -57,6 +62,9 @@ int main(int argc, char *argv[]) {
     	    //search->print_statistics();
     	    exit_with(utils::ExitCode::SEARCH_OUT_OF_MEMORY);
     	}
+#else
+		cout << "Planner was compiled without SAT solver support. Exiting." << endl;
+#endif
 	} else {
     	// Let's create a couple unique_ptr's that deal with mem allocation themselves
     	std::unique_ptr<SearchBase> search(SearchFactory::create(opt.get_search_engine(), opt.get_state_representation()));

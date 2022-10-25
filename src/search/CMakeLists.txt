@@ -2,14 +2,11 @@ cmake_minimum_required(VERSION 3.9)
 project(search)
 
 set(CMAKE_CXX_STANDARD 17)
+cmake_policy(SET CMP0115 OLD)
 
-set(CPLEX_SOURCE_DIR /home/gregor/Workspace/cplex)
-#set(CPLEX_SOURCE_DIR /home/dh/programme/CPLEX_Studio1210)
-link_directories("/home/gregor/Workspace/kissat/build")
+option(SAT "Compile with the SAT planner" OFF)
+option(KISSAT "Compile with the kissat SAT solver" ON)
 
-
-## required for IBM's CPLEX in order to force it to use newer names for the std headers
-add_definitions(-DIL_STD)
 
 list(APPEND linker_flags "$<$<CONFIG:DEBUG>:-lpthread;-g>" "$<$<CONFIG:RELEASE>:-flto;-lpthread>")
 
@@ -35,8 +32,16 @@ set(CMAKE_CXX_FLAGS_DEBUG
         "${CMAKE_CXX_FLAGS_DEBUG} -Og -pg \
         -fsanitize=undefined -fno-omit-frame-pointer")
 
+		
+if (SAT)
+	message("Compiling with SAT planner. Adding link directory")
+	link_directories(${SAT_DIR})
+else (SAT)
+	set(CMAKE_CXX_FLAGS "-Wall -Wnon-virtual-dtor -DCMAKE_NO_SAT")
+endif(SAT)
 
-add_executable(search
+
+set(GENERAL_SOURCE_FILES
         main.cc
         task.cc task.h
         predicate.cc predicate.h
@@ -104,38 +109,31 @@ add_executable(search
         lifted_heuristic/rule_matcher.cc lifted_heuristic/rule_matcher.h
         lifted_heuristic/grounders/grounder.h
         lifted_heuristic/grounders/weighted_grounder.cc lifted_heuristic/grounders/weighted_grounder.h search_engines/lazy_search.cc search_engines/lazy_search.h
+		)
+
+set(SAT_SOURCE_FILES
 		sat/lifted_sat.cpp sat/lifted_sat.h
 		sat/sat_encoder.cpp sat/sat_encoder.h
 		sat/ipasir.h
-		sat/kissat.h sat/kissat.cpp
-		)
+	)
 
-add_library(cplex SHARED IMPORTED)
-set_target_properties(cplex  PROPERTIES
-        IMPORTED_LOCATION "${CPLEX_SOURCE_DIR}/cplex/lib/x86-64_linux/static_pic/libcplex.a"
-        INTERFACE_INCLUDE_DIRECTORIES "${CPLEX_SOURCE_DIR}/cplex/include"
-        )
 
-add_library(ilocplex SHARED IMPORTED)
-set_target_properties(ilocplex  PROPERTIES
-        IMPORTED_LOCATION "${CPLEX_SOURCE_DIR}/cplex/lib/x86-64_linux/static_pic/libilocplex.a"
-        INTERFACE_INCLUDE_DIRECTORIES "${CPLEX_SOURCE_DIR}/cplex/include"
-        )
-
-add_library(concert SHARED IMPORTED)
-set_target_properties(concert  PROPERTIES
-        IMPORTED_LOCATION "${CPLEX_SOURCE_DIR}/concert/lib/x86-64_linux/static_pic/libconcert.a"
-        INTERFACE_INCLUDE_DIRECTORIES "${CPLEX_SOURCE_DIR}/concert/include"
-        )
+if (SAT)
+	if (KISSAT)
+		add_executable(search ${GENERAL_SOURCE_FILES} ${SAT_SOURCE_FILES} sat/kissat.h sat/kissat.cpp)
+		target_link_libraries(search PRIVATE kissat)
+	else (KISSAT)
+		add_executable(search ${GENERAL_SOURCE_FILES} ${SAT_SOURCE_FILES})
+		target_link_libraries(search PRIVATE ipasircryptominisat5)
+	endif()
+else (SAT)
+	add_executable(search ${GENERAL_SOURCE_FILES})
+endif()
+		
 
 target_link_options(search PUBLIC ${linker_flags})
 
-#target_link_libraries(search PRIVATE ipasircryptominisat5)
-target_link_libraries(search PRIVATE kissat)
 
-target_link_libraries(search PRIVATE ilocplex)
-target_link_libraries(search PRIVATE concert)
-target_link_libraries(search PRIVATE cplex)
 target_link_libraries(search PRIVATE m)
 target_link_libraries(search PRIVATE pthread)
 target_link_libraries(search PRIVATE dl)
