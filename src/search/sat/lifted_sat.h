@@ -5,10 +5,10 @@
 #ifndef SEARCH_LIFTE_SAT_H
 #define SEARCH_LIFTE_SAT_H
 
-#include <ilcplex/ilocplex.h>
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
+#include <ctime>
 #include "sat_encoder.h"
 #include "../utils/system.h"
 #include "../task.h"
