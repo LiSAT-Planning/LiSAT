@@ -15,7 +15,7 @@ class Options {
     std::string state_representation;
     std::string datalog_file;
     unsigned seed;
-	unsigned int planLength;
+	int planLength;
 	bool optimal;
 	bool incremental;
 
@@ -31,7 +31,7 @@ public:
             ("search,s", po::value<std::string>()->required(), "Search engine.")
             ("state-representation,r", po::value<std::string>()->default_value("sparse"), "State representation.")
             ("datalog-file", po::value<std::string>()->default_value("FilePathUndefined"), "Datalog model file.")
-            ("planLength,l", po::value<unsigned>()->default_value(100), "Plan length for the SAT encoding")
+            ("planLength,l", po::value<int>()->default_value(-1), "Plan length for the SAT encoding. If it is -1, then the satisficing solver will run in portfolio mode.")
             ("optimal,o", "Run the SAT planner in optimal mode")
             ("incremental,i", "Run the SAT planner in incremenal mode. ATTENTION: this is not supported by all SAT solvers")
             ;
@@ -59,7 +59,7 @@ public:
         state_representation = vm["state-representation"].as<std::string>();
         datalog_file = vm["datalog-file"].as<std::string>();
         seed = vm["seed"].as<unsigned>();
-        planLength = vm["planLength"].as<unsigned int>();
+        planLength = vm["planLength"].as<int>();
         optimal = vm.count("optimal");
         incremental = vm.count("incremental");
     }
@@ -92,7 +92,7 @@ public:
         return seed;
     }
 
-    unsigned int get_planLength() const {
+    int get_planLength() const {
         return planLength;
     }
 

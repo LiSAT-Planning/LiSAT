@@ -36,6 +36,10 @@ set(CMAKE_CXX_FLAGS_DEBUG
 if (SAT)
 	message("Compiling with SAT planner. Adding link directory")
 	link_directories(${SAT_DIR})
+	if (KISSAT)
+	else (KISSAT)
+		set(CMAKE_CXX_FLAGS "-Wall -Wnon-virtual-dtor -DCMAKE_NO_TERMINATE")
+	endif (KISSAT)
 else (SAT)
 	set(CMAKE_CXX_FLAGS "-Wall -Wnon-virtual-dtor -DCMAKE_NO_SAT")
 endif(SAT)
@@ -114,6 +118,7 @@ set(GENERAL_SOURCE_FILES
 set(SAT_SOURCE_FILES
 		sat/lifted_sat.cpp sat/lifted_sat.h
 		sat/sat_encoder.cpp sat/sat_encoder.h
+		sat/sat_termination.cpp sat/sat_termination.h
 		sat/ipasir.h
 	)
 

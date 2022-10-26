@@ -4,6 +4,7 @@
 
 #include "lifted_sat.h"
 #include "sat_encoder.h"
+#include "sat_termination.h"
 #include "ipasir.h"
 #include "../action.h"
 #include "../search_engines/utils.h"
@@ -753,7 +754,8 @@ int goalDeleter = 0;
 // pastIncremental - true -> we are in an incremental run over the ACD
 
 bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTime, void* solver, sat_capsule & capsule,
-		bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, bool pastIncremental, int pastLimit) {
+		bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, bool pastIncremental,
+		int pastLimit, long long time_limit_in_ms) {
 	//for (size_t action = 0; action < task.actions.size(); action++){
 	//	for (size_t param = 0; param < task.actions[action].get_parameters().size(); param++){
 	//		int myType = task.actions[action].get_parameters()[param].type;
@@ -1721,8 +1723,21 @@ bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTim
 	DEBUG(capsule.printVariables());
 
 	DEBUG(cout << "Starting solver" << endl);
+	bool* stopFlag = nullptr;
 	std::clock_t solver_start = std::clock();
+
+	if (time_limit_in_ms != -1) {
+		// the given timelimit is relative to the startTime clock
+
+		double time_since_start_in_ms = 1000.0 * (solver_start - startTime) / CLOCKS_PER_SEC;
+		double timelimit_for_solver = time_limit_in_ms - time_since_start_in_ms;
+		cout << endl << "\t\t #### setting solver time limit "  << setw(10) << timelimit_for_solver << endl;
+		stopFlag = ensure_termination_after(solver,timelimit_for_solver);
+	}
+
+
 	int state = ipasir_solve(solver);
+	if (stopFlag != nullptr) stop_termination_checking(stopFlag); // tell the termination checker to terminate itself
 	std::clock_t solver_end = std::clock();
 	double solver_time_in_ms = 1000.0 * (solver_end-solver_start) / CLOCKS_PER_SEC;
 	DEBUG(cout << "Solver time: " << fixed << solver_time_in_ms << "ms" << endl);
@@ -1783,131 +1798,162 @@ bool LiftedSAT::generate_formula(const Task &task, const std::clock_t & startTim
 
 
 utils::ExitCode LiftedSAT::solve(const Task &task, int limit, bool optimal, bool incremental) {
-    maxLen = limit;
 	bool satisficing = !optimal;
 
 	if (satisficing){
 		DEBUG(cout << "Parameter arity " << maxArity << " Objects " << task.objects.size() << endl);
-		// start the incremental search for a plan	
-		void* solver;
-		if (incremental)
-			solver = ipasir_init();
-		sat_capsule capsule;
-		
-		for (int pastLimit = 1; pastLimit < maxLen + 1; pastLimit++){
-			if (!incremental) {// create a new solver instance for every ACD
+	
+	
+		vector<int> planLenghtsToTry;
+		if (limit == -1){
+			planLenghtsToTry.push_back(10);
+			planLenghtsToTry.push_back(25);
+			planLenghtsToTry.push_back(50);
+			planLenghtsToTry.push_back(100);
+			planLenghtsToTry.push_back(200);
+		} else
+			planLenghtsToTry.push_back(limit);
+	
+
+		long long overall_time_limit = 30*60*1000;
+
+		std::clock_t overall_start = std::clock();
+		double overall_start_in_ms = 1000.0 * (overall_start) / CLOCKS_PER_SEC;
+		cout << endl << "\t\t #### Current time " << setw(10) << overall_start_in_ms  << endl;
+
+		for (int currentLimitIndex = 0; currentLimitIndex < int(planLenghtsToTry.size()); currentLimitIndex++){
+			maxLen = planLenghtsToTry[currentLimitIndex];
+			std::clock_t start = std::clock();
+			double already_used_time_is_ms = 1000.0 * (start - overall_start) / CLOCKS_PER_SEC;
+			double remaining_time_is_ms = overall_time_limit - already_used_time_is_ms;
+			double my_time_slice = remaining_time_is_ms / (planLenghtsToTry.size() - currentLimitIndex);
+			cout << endl << "\t\t #### Starting plan length " << setw(5) << maxLen << " time limit " << setw(10) << my_time_slice << endl;
+
+	
+			// start the incremental search for a plan	
+			void* solver;
+			if (incremental)
 				solver = ipasir_init();
-				capsule.number_of_variables = 0;
-				DEBUG(capsule.variableNames.clear());
-				reset_number_of_clauses();
+			sat_capsule capsule;
+			
+			for (int pastLimit = 1; pastLimit < maxLen + 1; pastLimit++){
+				if (!incremental) {// create a new solver instance for every ACD
+					solver = ipasir_init();
+					capsule.number_of_variables = 0;
+					DEBUG(capsule.variableNames.clear());
+					reset_number_of_clauses();
 
 
-				// reset formula size counters
-				actionTyping = 0;
-				atMostOneParamterValue = 0;
-				variableInitMaintenance = 0;
-				precSupport = 0;
-				equals = 0;
-				initSupp = 0;
-				nullary = 0;
-				equalsPrecs = 0; 
-				achieverImplications = 0; 
-				staticInitSupp = 0;
-				noDeleter = 0; 
-				oneAction = 0; 
-				goalAchiever = 0; 
-				goalDeleter = 0; 
-			}
+					// reset formula size counters
+					actionTyping = 0;
+					atMostOneParamterValue = 0;
+					variableInitMaintenance = 0;
+					precSupport = 0;
+					equals = 0;
+					initSupp = 0;
+					nullary = 0;
+					equalsPrecs = 0; 
+					achieverImplications = 0; 
+					staticInitSupp = 0;
+					noDeleter = 0; 
+					oneAction = 0; 
+					goalAchiever = 0; 
+					goalDeleter = 0; 
+				}
+
+				
+				cout << endl << "Maximum Achiever Consumer Distance (ACD) " << setw(5) << pastLimit << endl;
+				cout << "===================================================="  << endl;
+			
+				int maxPlanLength = maxLen + 2;
+				solverTotal = 0;
+
+				if (!incremental){
+					goalSupporterVars.clear();
+					parameterVars.clear();
+					initNotTrueAfter.clear();
+					actionVars.clear();
+					parameterEquality.clear();
+					precSupporter.clear();
+					precSupporterOver.clear();
+				}
+
+				if (pastLimit == 1 || !incremental){
+					// the goal must be achieved!
+					int gc = 0;
+					for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
+						const AtomicGoal & goalAtom = task.goal.goal[goal];
+						std::vector<int> goalSupporter;
+						
+						if (goalAtom.negated) {
+							goalSupporterVars.push_back(goalSupporter);
+							continue; // TODO don't know what to do ...
+						}
+						gc++;
+
+						//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
+					
+						for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
+							int goalSuppVar = capsule.new_variable();
+							goalSupporter.push_back(goalSuppVar);
+							DEBUG(capsule.registerVariable(goalSuppVar, "goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
+
+						}
+						if (atom_not_satisfied(task.initial_state,goalAtom)) assertNot(solver,goalSupporter[0]);	
+						
+						atLeastOne(solver,capsule,goalSupporter);
+						goalSupporterVars.push_back(goalSupporter);
+					}
+
+					// we only test executable plans and if the goal is a dead end ...
+					//if (!gc) return 0;
+
+					
+					for (int n : task.nullary_predicates){
+						int nullaryInInit = capsule.new_variable();
+						lastNullary[n] = nullaryInInit;
+						DEBUG(capsule.registerVariable(nullaryInInit,
+									"nullary#" + to_string(n) + "_" + to_string(-1)));
+
+						if (task.initial_state.get_nullary_atoms()[n])
+							assertYes(solver,nullaryInInit);
+						else
+							assertNot(solver,nullaryInInit);
+					}
+				}
 
 			
-			cout << endl << "Maximum Achiever Consumer Distance (ACD) " << setw(5) << pastLimit << endl;
-			cout << "===================================================="  << endl;
-		
-			std::clock_t start = std::clock();
-			int maxPlanLength = maxLen + 2;
-			solverTotal = 0;
-
-			if (!incremental){
-				goalSupporterVars.clear();
-				parameterVars.clear();
-				initNotTrueAfter.clear();
-				actionVars.clear();
-				parameterEquality.clear();
-				precSupporter.clear();
-				precSupporterOver.clear();
-			}
-
-			if (pastLimit == 1 || !incremental){
-				// the goal must be achieved!
-				int gc = 0;
-				for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
-					const AtomicGoal & goalAtom = task.goal.goal[goal];
-					std::vector<int> goalSupporter;
-					
-					if (goalAtom.negated) {
-						goalSupporterVars.push_back(goalSupporter);
-						continue; // TODO don't know what to do ...
-					}
-					gc++;
-
-					//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
-				
-					for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
-						int goalSuppVar = capsule.new_variable();
-						goalSupporter.push_back(goalSuppVar);
-						DEBUG(capsule.registerVariable(goalSuppVar, "goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
-
-					}
-					if (atom_not_satisfied(task.initial_state,goalAtom)) assertNot(solver,goalSupporter[0]);	
-					
-					atLeastOne(solver,capsule,goalSupporter);
-					goalSupporterVars.push_back(goalSupporter);
+				planLength = 0;
+				while (planLength < maxLen){
+					planLength++;
+					generate_formula(task,start,solver,capsule,true,false,!incremental,incremental,pastLimit);
 				}
-
-				// we only test executable plans and if the goal is a dead end ...
-				//if (!gc) return 0;
-
-				
-				for (int n : task.nullary_predicates){
-					int nullaryInInit = capsule.new_variable();
-					lastNullary[n] = nullaryInInit;
-					DEBUG(capsule.registerVariable(nullaryInInit,
-								"nullary#" + to_string(n) + "_" + to_string(-1)));
-
-					if (task.initial_state.get_nullary_atoms()[n])
-						assertYes(solver,nullaryInInit);
-					else
-						assertNot(solver,nullaryInInit);
-				}
-			}
-
-		
-			planLength = 0;
-			while (planLength < maxLen){
 				planLength++;
-				generate_formula(task,start,solver,capsule,true,false,!incremental,incremental,pastLimit);
-			}
-			planLength++;
-			if (generate_formula(task,start,solver,capsule,false,false,!incremental,incremental,pastLimit)){
-				ipasir_release(solver);
-				cout << "\t\tPlan of length: " << planLength << endl;
-				DEBUG(cout << "\t\tPlan of length: " << planLength << endl);
-				return utils::ExitCode::SUCCESS;
-			} else {
-				cout << "\t\tNo plan of length: " << planLength << endl;
-				DEBUG(cout << "\t\tNo plan of length: " << planLength << endl);
-				std::clock_t end = std::clock();
-				double time_in_ms = 1000.0 * (end-start) / CLOCKS_PER_SEC;
-				//cout << "Total time: " << fixed << time_in_ms << "ms" << endl;
-				if (time_in_ms > 300000000){
+				if (generate_formula(task,start,solver,capsule,false,false,!incremental,incremental,pastLimit, my_time_slice)){
 					ipasir_release(solver);
-					return utils::ExitCode::SEARCH_OUT_OF_TIME;
+					cout << "\t\tPlan of length: " << planLength << endl;
+					DEBUG(cout << "\t\tPlan of length: " << planLength << endl);
+					return utils::ExitCode::SUCCESS;
+				} else {
+					cout << "\t\tNo plan of length: " << planLength << endl;
+					DEBUG(cout << "\t\tNo plan of length: " << planLength << endl);
+					std::clock_t end = std::clock();
+					double time_in_ms = 1000.0 * (end-start) / CLOCKS_PER_SEC;
+					if (time_in_ms >= my_time_slice){
+						ipasir_release(solver);
+						// if we are the last length to try and timed out ...
+						if (planLenghtsToTry.size() - 1 == currentLimitIndex)
+							return utils::ExitCode::SEARCH_OUT_OF_TIME;
+						else
+							break; // exit the loop iterating over past limits
+					}
 				}
+				if (!incremental)
+					ipasir_release(solver);
 			}
-			if (!incremental)
-				ipasir_release(solver);
 		}
 	} else {
+		if (limit == -1) maxLen = 9999999; else maxLen = limit;
 		void* solver;
 		sat_capsule capsule;
 		if (incremental){
