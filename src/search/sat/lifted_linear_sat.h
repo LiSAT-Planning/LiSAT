@@ -81,7 +81,8 @@ public:
 
     LiftedLinearSAT(const Task& task);
 	utils::ExitCode solve(const Task& task, int limit, bool optimal, bool incremental);
-	bool generate_formula(const Task &task, const std::clock_t & start, void* solver, sat_capsule & capsule, bool onlyGenerate, bool forceActionEveryStep, bool onlyHardConstraints, bool pastIncremental, int pastLimit = 10000, long long time_limit_in_ms = -1);
+	void generate_formula(const Task &task, void* solver, sat_capsule & capsule);
+	bool callSolver(sat_capsule & capsule, void* solver, const Task &task, const std::clock_t & startTime,long long time_limit_in_ms = -1);
 	bool atom_not_satisfied(const DBState &s, const AtomicGoal &atomicGoal) const;
 
     int actionID(int i);
