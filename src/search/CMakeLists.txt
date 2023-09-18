@@ -117,6 +117,7 @@ set(GENERAL_SOURCE_FILES
 
 set(SAT_SOURCE_FILES
 		sat/lifted_sat.cpp sat/lifted_sat.h
+		sat/lifted_linear_sat.cpp sat/lifted_linear_sat.h
 		sat/sat_encoder.cpp sat/sat_encoder.h
 		sat/sat_termination.cpp sat/sat_termination.h
 		sat/ipasir.h
