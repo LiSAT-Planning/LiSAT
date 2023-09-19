@@ -1,5 +1,5 @@
 //
-// Created by Daniel Höller on 27.08.21.
+// Created by Gregor Behnke
 //
 
 #include "lifted_linear_sat.h"
@@ -24,15 +24,22 @@ extern vector<vector<vector<pair<vector<int>,int>>>> supportingTuples; // action
 extern vector<vector<vector<pair<vector<int>,int>>>> deletedTuples; // action -> precondition
 
 
+map<int,map<int,int>> predicateArgumentPositions;
+int numberOfPredicateArgumentPositions;
+map<int,int> typeOfPredicateArgument;
+vector<vector<pair<vector<int>,int>>> supportingPredicateTuples; // predicate
+
+
 LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 	numActions = task.actions.size();
     numObjs = task.objects.size();
 
+
+	////////////////// argument positioning of actions
 	map<int,int> maxNum;
-	map<int,int> objCount;
 
     for (auto a: task.actions) {
-        maxArity = max(maxArity, (int) a.get_parameters().size());
+        maxActionArity = max(maxActionArity, (int) a.get_parameters().size());
         maxPrec = max(maxPrec, (int) a.get_precondition().size());
 		
 		map<int,int> thisCount;
@@ -65,8 +72,51 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			cout << " " << a << "->" << b;
 		cout << endl;
 	}
+	////////////////// argument positioning of actions
+	maxNum.clear();
+
+    for (auto p: task.predicates) {
+		if (p.isStaticPredicate()) continue; // static predicates get special treatment
+        maxPredicateArity = max(maxPredicateArity, (int) p.getTypes().size());
+		
+		map<int,int> thisCount;
+		for (auto paraType : p.getTypes())
+			thisCount[paraType] += 1;
+
+		for (auto p : thisCount)
+			if (maxNum[p.first] < p.second)
+				maxNum[p.first] = p.second;
+    }
+
+	numberOfPredicateArgumentPositions = 0;
+	map<int,int> firstPredicateArgumentOfType;
+	for (auto p : maxNum){
+		firstPredicateArgumentOfType[p.first] = numberOfPredicateArgumentPositions;
+		for (int i = numberOfPredicateArgumentPositions; i < numberOfPredicateArgumentPositions + p.second; i++)
+			typeOfPredicateArgument[i] = p.first;
+		numberOfPredicateArgumentPositions += p.second;
+	}
 
 
+	for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
+		auto p = task.predicates[pIndex];
+		if (p.isStaticPredicate()) continue; // static predicates get special treatment
+		map<int,int> thisCount;
+		for (int para = 0; para < int(p.getTypes().size()); para++){
+			predicateArgumentPositions[pIndex][para] = firstPredicateArgumentOfType[p.getTypes()[para]] + thisCount[p.getTypes()[para]];
+			thisCount[p.getTypes()[para]] += 1;
+		}
+
+		
+		cout << "Predicate #" << pIndex << " "  << p.getName() << ":";
+		for (auto [a,b] : predicateArgumentPositions[pIndex])
+			cout << " " << a << "->" << b;
+		cout << endl;
+	}
+
+
+	//////////////////////////////////////////////////////////////////////////
+	map<int,int> objCount;
     for (size_t obj = 0; obj < task.objects.size(); obj++) {
         auto oTypes = task.objects[obj].getTypes();
         for (size_t i = 0; i < oTypes.size(); i++)
@@ -76,7 +126,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 	for (auto p : maxNum){
 		cout << "T " << setw(2) << p.first << " # " << setw(2) << p.second << " size " << setw(5) << objCount[p.first] << endl;
 	}
-	cout << "Max Arity: " << maxArity << " diffSum: " << numberOfArgumentPositions << endl; 
+	cout << "Max Arity: " << maxActionArity << " diffSum: " << numberOfArgumentPositions << endl; 
 	//exit(0);
     
     cout << "- re-inferring type hierarchy..." << endl;
@@ -108,334 +158,334 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
         }
     }
 
-    // create data structure for nullary precs/effects -> from bitmap to iterable set
-    for (tSize a = 0; a < task.actions.size(); a++) {
-        setPosNullaryPrec.push_back(new unordered_set<int>);
-        setNegNullaryPrec.push_back(new unordered_set<int>);
-        setPosNullaryEff.push_back(new unordered_set<int>);
-        setNegNullaryEff.push_back(new unordered_set<int>);
+    //// create data structure for nullary precs/effects -> from bitmap to iterable set
+    //for (tSize a = 0; a < task.actions.size(); a++) {
+    //    setPosNullaryPrec.push_back(new unordered_set<int>);
+    //    setNegNullaryPrec.push_back(new unordered_set<int>);
+    //    setPosNullaryEff.push_back(new unordered_set<int>);
+    //    setNegNullaryEff.push_back(new unordered_set<int>);
 
-        auto posPrec = task.actions[a].get_positive_nullary_precond();
-        for (tSize f = 0; f < posPrec.size(); f++) {
-            if (posPrec[f]) {
-                setPosNullaryPrec[a]->insert(f);
-            }
-        }
-        auto negPrec = task.actions[a].get_negative_nullary_precond();
-        for (tSize f = 0; f < negPrec.size(); f++) {
-            if (negPrec[f]) {
-                setNegNullaryPrec[a]->insert(f);
-            }
-        }
-        auto posEff = task.actions[a].get_positive_nullary_effects();
-        for (tSize f = 0; f < posEff.size(); f++) {
-            if (posEff[f]) {
-                setPosNullaryEff[a]->insert(f);
-				nullaryAchiever[f].push_back(a);
-            }
-        }
-        auto negEff = task.actions[a].get_negative_nullary_effects();
-        for (tSize f = 0; f < negEff.size(); f++) {
-            if (negEff[f]) {
-                setNegNullaryEff[a]->insert(f);
-				nullaryDestroyer[f].push_back(a);
-            }
-        }
-    }
+    //    auto posPrec = task.actions[a].get_positive_nullary_precond();
+    //    for (tSize f = 0; f < posPrec.size(); f++) {
+    //        if (posPrec[f]) {
+    //            setPosNullaryPrec[a]->insert(f);
+    //        }
+    //    }
+    //    auto negPrec = task.actions[a].get_negative_nullary_precond();
+    //    for (tSize f = 0; f < negPrec.size(); f++) {
+    //        if (negPrec[f]) {
+    //            setNegNullaryPrec[a]->insert(f);
+    //        }
+    //    }
+    //    auto posEff = task.actions[a].get_positive_nullary_effects();
+    //    for (tSize f = 0; f < posEff.size(); f++) {
+    //        if (posEff[f]) {
+    //            setPosNullaryEff[a]->insert(f);
+	//			nullaryAchiever[f].push_back(a);
+    //        }
+    //    }
+    //    auto negEff = task.actions[a].get_negative_nullary_effects();
+    //    for (tSize f = 0; f < negEff.size(); f++) {
+    //        if (negEff[f]) {
+    //            setNegNullaryEff[a]->insert(f);
+	//			nullaryDestroyer[f].push_back(a);
+    //        }
+    //    }
+    //}
 
-    cout << "- building achiever lookup tables..." << endl;
-    // !!! this code assumes the non-sparse (i.e. transitively closed) typing !!!
-    for (tSize iAction = 0; iAction < task.actions.size(); iAction++) {
-        auto consumer = task.actions[iAction];
-        achievers.push_back(new LActionPrecAchievers);
-        const auto precs = consumer.get_precondition();
-        for (tSize iPrec = 0; iPrec < precs.size(); iPrec++) {
-            achievers[iAction]->precAchievers.push_back(new LActionPrecAchiever);
-            const auto prec = precs[iPrec];
-            // check for this single prec which other actions can achieve it. need to check
-            // - predicate
-            // - typing of the specific parameters
-            for (tSize iPosAch = 0; iPosAch < task.actions.size(); iPosAch++) {
-                auto posAchAction = task.actions[iPosAch];
-                for (tSize ie = 0; ie < posAchAction.get_effects().size(); ie++) {
-                    auto eff = posAchAction.get_effects()[ie];
-                    if (eff.predicate_symbol == prec.predicate_symbol) {
-                        /* ** check typing **
-                         * what shall be excluded is that the predicate is defined on consumer
-                         * parent type, but the effect and the precondition are siblings
-                         *
-                         * example: In consumer transport domain, consumer locatable object may be consumer
-                         * transporter or consumer package. The "at" predicate may be defined
-                         * on "locatable"s. However, the "at" predicate of consumer package
-                         * cannot be fulfilled with consumer drive action.
-                         */
-                        bool typesCompatible = true;
-                        for (tSize iArg = 0; iArg < prec.arguments.size(); iArg++) {
-                            int varP = prec.arguments[iArg].index;
-                            int varE = eff.arguments[iArg].index;
-                            const bool pIsConst = prec.arguments[iArg].constant;
-                            const bool eIsConst = eff.arguments[iArg].constant;
-                            if (pIsConst && eIsConst) {
-                                if (varP == varE) {
-                                    continue;
-                                }
-                            } else if (pIsConst) {
-                                int typeE = posAchAction.get_parameters()[varE].type;
-                                if (types[typeE].find(varP) != types[typeE].end()) {
-                                    continue;
-                                }
-                            } else if (eIsConst) {
-                                int typeP = consumer.get_parameters()[varP].type;
-                                if (types[typeP].find(varE) != types[typeP].end()) {
-                                    continue;
-                                }
-                            } else {
-                                int typeP = consumer.get_parameters()[varP].type;
-                                int typeE = posAchAction.get_parameters()[varE].type;
-                                if (typeP == typeE) continue;
-                                if (parents[typeP].find(typeE) != parents[typeP].end()) continue;
-                                if (parents[typeE].find(typeP) != parents[typeE].end()) continue;
-                            }
-                            typesCompatible = false;
-                            break;
-                        }
-                        if (typesCompatible) {
-                            LAchiever *ach = new LAchiever;
-                            ach->action = iPosAch;
-                            ach->effect = ie;
-                            for (tSize ip = 0; ip < eff.arguments.size(); ip++) {
-                                auto args = eff.arguments[ip];
-                                if (!args.constant) {
-                                    ach->params.push_back(args.index);
-                                } else {
-                                    ach->params.push_back((args.index + 1) * -1);
-                                }
-                            }
-                            if (eff.negated == prec.negated) {
-                                achievers[iAction]->precAchievers[iPrec]->achievers.push_back(ach);
-                            } else {
-                                achievers[iAction]->precAchievers[iPrec]->destroyers.push_back(ach);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        for (int posPrec: *setPosNullaryPrec[iAction]) {
-            achievers[iAction]->posNullaryPrecAchievers[posPrec] = new LActionPrecAchiever;
-            for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
-                auto possAchAction = task.actions[iPossibleAch];
-                if (possAchAction.get_positive_nullary_effects()[posPrec]) {
-                    LAchiever *ach = new LAchiever;
-                    ach->action = iPossibleAch;
-                    achievers[iAction]->posNullaryPrecAchievers[posPrec]->achievers.push_back(ach);
-                }
-            }
-        }
-        for (int negPrec: *setNegNullaryPrec[iAction]) {
-            achievers[iAction]->negNullaryPrecAchievers[negPrec] = new LActionPrecAchiever;
-            for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
-                auto possAchAction = task.actions[iPossibleAch];
-                if (possAchAction.get_negative_nullary_effects()[negPrec]) {
-                    LAchiever *ach = new LAchiever;
-                    ach->action = iPossibleAch;
-                    achievers[iAction]->negNullaryPrecAchievers[negPrec]->achievers.push_back(ach);
-                }
-            }
-        }
-    }
+    //cout << "- building achiever lookup tables..." << endl;
+    //// !!! this code assumes the non-sparse (i.e. transitively closed) typing !!!
+    //for (tSize iAction = 0; iAction < task.actions.size(); iAction++) {
+    //    auto consumer = task.actions[iAction];
+    //    achievers.push_back(new LActionPrecAchievers);
+    //    const auto precs = consumer.get_precondition();
+    //    for (tSize iPrec = 0; iPrec < precs.size(); iPrec++) {
+    //        achievers[iAction]->precAchievers.push_back(new LActionPrecAchiever);
+    //        const auto prec = precs[iPrec];
+    //        // check for this single prec which other actions can achieve it. need to check
+    //        // - predicate
+    //        // - typing of the specific parameters
+    //        for (tSize iPosAch = 0; iPosAch < task.actions.size(); iPosAch++) {
+    //            auto posAchAction = task.actions[iPosAch];
+    //            for (tSize ie = 0; ie < posAchAction.get_effects().size(); ie++) {
+    //                auto eff = posAchAction.get_effects()[ie];
+    //                if (eff.predicate_symbol == prec.predicate_symbol) {
+    //                    /* ** check typing **
+    //                     * what shall be excluded is that the predicate is defined on consumer
+    //                     * parent type, but the effect and the precondition are siblings
+    //                     *
+    //                     * example: In consumer transport domain, consumer locatable object may be consumer
+    //                     * transporter or consumer package. The "at" predicate may be defined
+    //                     * on "locatable"s. However, the "at" predicate of consumer package
+    //                     * cannot be fulfilled with consumer drive action.
+    //                     */
+    //                    bool typesCompatible = true;
+    //                    for (tSize iArg = 0; iArg < prec.arguments.size(); iArg++) {
+    //                        int varP = prec.arguments[iArg].index;
+    //                        int varE = eff.arguments[iArg].index;
+    //                        const bool pIsConst = prec.arguments[iArg].constant;
+    //                        const bool eIsConst = eff.arguments[iArg].constant;
+    //                        if (pIsConst && eIsConst) {
+    //                            if (varP == varE) {
+    //                                continue;
+    //                            }
+    //                        } else if (pIsConst) {
+    //                            int typeE = posAchAction.get_parameters()[varE].type;
+    //                            if (types[typeE].find(varP) != types[typeE].end()) {
+    //                                continue;
+    //                            }
+    //                        } else if (eIsConst) {
+    //                            int typeP = consumer.get_parameters()[varP].type;
+    //                            if (types[typeP].find(varE) != types[typeP].end()) {
+    //                                continue;
+    //                            }
+    //                        } else {
+    //                            int typeP = consumer.get_parameters()[varP].type;
+    //                            int typeE = posAchAction.get_parameters()[varE].type;
+    //                            if (typeP == typeE) continue;
+    //                            if (parents[typeP].find(typeE) != parents[typeP].end()) continue;
+    //                            if (parents[typeE].find(typeP) != parents[typeE].end()) continue;
+    //                        }
+    //                        typesCompatible = false;
+    //                        break;
+    //                    }
+    //                    if (typesCompatible) {
+    //                        LAchiever *ach = new LAchiever;
+    //                        ach->action = iPosAch;
+    //                        ach->effect = ie;
+    //                        for (tSize ip = 0; ip < eff.arguments.size(); ip++) {
+    //                            auto args = eff.arguments[ip];
+    //                            if (!args.constant) {
+    //                                ach->params.push_back(args.index);
+    //                            } else {
+    //                                ach->params.push_back((args.index + 1) * -1);
+    //                            }
+    //                        }
+    //                        if (eff.negated == prec.negated) {
+    //                            achievers[iAction]->precAchievers[iPrec]->achievers.push_back(ach);
+    //                        } else {
+    //                            achievers[iAction]->precAchievers[iPrec]->destroyers.push_back(ach);
+    //                        }
+    //                    }
+    //                }
+    //            }
+    //        }
+    //    }
+    //    for (int posPrec: *setPosNullaryPrec[iAction]) {
+    //        achievers[iAction]->posNullaryPrecAchievers[posPrec] = new LActionPrecAchiever;
+    //        for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+    //            auto possAchAction = task.actions[iPossibleAch];
+    //            if (possAchAction.get_positive_nullary_effects()[posPrec]) {
+    //                LAchiever *ach = new LAchiever;
+    //                ach->action = iPossibleAch;
+    //                achievers[iAction]->posNullaryPrecAchievers[posPrec]->achievers.push_back(ach);
+    //            }
+    //        }
+    //    }
+    //    for (int negPrec: *setNegNullaryPrec[iAction]) {
+    //        achievers[iAction]->negNullaryPrecAchievers[negPrec] = new LActionPrecAchiever;
+    //        for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+    //            auto possAchAction = task.actions[iPossibleAch];
+    //            if (possAchAction.get_negative_nullary_effects()[negPrec]) {
+    //                LAchiever *ach = new LAchiever;
+    //                ach->action = iPossibleAch;
+    //                achievers[iAction]->negNullaryPrecAchievers[negPrec]->achievers.push_back(ach);
+    //            }
+    //        }
+    //    }
+    //}
 
-    // same for goals
-    goalAchievers = new LActionPrecAchievers;
-    for (tSize iGoal = 0; iGoal < task.goal.goal.size(); iGoal++) {
-        AtomicGoal goal = task.goal.goal[iGoal];
-        goalAchievers->precAchievers.push_back(new LActionPrecAchiever);
-        for (tSize iPosAch = 0; iPosAch < task.actions.size(); iPosAch++) {
-            auto posAchAction = task.actions[iPosAch];
-            for (tSize ie = 0; ie < posAchAction.get_effects().size(); ie++) {
-                auto eff = posAchAction.get_effects()[ie];
-                if (eff.predicate_symbol == goal.predicate) {
-                    bool typesCompatible = true;
-                    for (tSize iArg = 0; iArg < goal.args.size(); iArg++) {
-                        int goalObj = goal.args[iArg];
-                        int varE = eff.arguments[iArg].index;
-                        if (eff.arguments[iArg].constant) {
-                            if (varE != goalObj) {
-                                typesCompatible = false;
-                                break;
-                            }
-                        } else {
-                            int typeE = posAchAction.get_parameters()[varE].type;
-                            if (types[typeE].find(goalObj) == types[typeE].end()) {
-                                typesCompatible = false;
-                                break;
-                            }
-                        }
-                    }
-                    if (typesCompatible) {
-                        LAchiever *ach = new LAchiever;
-                        ach->action = iPosAch;
-                        ach->effect = ie;
-                        for (tSize ip = 0; ip < eff.arguments.size(); ip++) {
-                            auto args = eff.arguments[ip];
-                            if (!args.constant) {
-                                ach->params.push_back(args.index);
-                            } else {
-                                ach->params.push_back((args.index + 1) * -1);
-                            }
-                        }
-                        if (eff.negated == goal.negated) {
-                            goalAchievers->precAchievers[iGoal]->achievers.push_back(ach);
-                        } else {
-                            goalAchievers->precAchievers[iGoal]->destroyers.push_back(ach);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    for (int posGoal: task.goal.positive_nullary_goals) {
-        goalAchievers->posNullaryPrecAchievers[posGoal] = new LActionPrecAchiever;
-        for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
-            auto possAchAction = task.actions[iPossibleAch];
-            if (possAchAction.get_positive_nullary_effects()[posGoal]) {
-                LAchiever *ach = new LAchiever;
-                ach->action = iPossibleAch;
-                goalAchievers->posNullaryPrecAchievers[posGoal]->achievers.push_back(ach);
-            }
-        }
-    }
-    for (int negGoal: task.goal.negative_nullary_goals) {
-        goalAchievers->negNullaryPrecAchievers[negGoal] = new LActionPrecAchiever;
-        for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
-            auto possAchAction = task.actions[iPossibleAch];
-            if (possAchAction.get_negative_nullary_effects()[negGoal]) {
-                LAchiever *ach = new LAchiever;
-                ach->action = iPossibleAch;
-                goalAchievers->negNullaryPrecAchievers[negGoal]->achievers.push_back(ach);
-            }
-        }
-    }
+    //// same for goals
+    //goalAchievers = new LActionPrecAchievers;
+    //for (tSize iGoal = 0; iGoal < task.goal.goal.size(); iGoal++) {
+    //    AtomicGoal goal = task.goal.goal[iGoal];
+    //    goalAchievers->precAchievers.push_back(new LActionPrecAchiever);
+    //    for (tSize iPosAch = 0; iPosAch < task.actions.size(); iPosAch++) {
+    //        auto posAchAction = task.actions[iPosAch];
+    //        for (tSize ie = 0; ie < posAchAction.get_effects().size(); ie++) {
+    //            auto eff = posAchAction.get_effects()[ie];
+    //            if (eff.predicate_symbol == goal.predicate) {
+    //                bool typesCompatible = true;
+    //                for (tSize iArg = 0; iArg < goal.args.size(); iArg++) {
+    //                    int goalObj = goal.args[iArg];
+    //                    int varE = eff.arguments[iArg].index;
+    //                    if (eff.arguments[iArg].constant) {
+    //                        if (varE != goalObj) {
+    //                            typesCompatible = false;
+    //                            break;
+    //                        }
+    //                    } else {
+    //                        int typeE = posAchAction.get_parameters()[varE].type;
+    //                        if (types[typeE].find(goalObj) == types[typeE].end()) {
+    //                            typesCompatible = false;
+    //                            break;
+    //                        }
+    //                    }
+    //                }
+    //                if (typesCompatible) {
+    //                    LAchiever *ach = new LAchiever;
+    //                    ach->action = iPosAch;
+    //                    ach->effect = ie;
+    //                    for (tSize ip = 0; ip < eff.arguments.size(); ip++) {
+    //                        auto args = eff.arguments[ip];
+    //                        if (!args.constant) {
+    //                            ach->params.push_back(args.index);
+    //                        } else {
+    //                            ach->params.push_back((args.index + 1) * -1);
+    //                        }
+    //                    }
+    //                    if (eff.negated == goal.negated) {
+    //                        goalAchievers->precAchievers[iGoal]->achievers.push_back(ach);
+    //                    } else {
+    //                        goalAchievers->precAchievers[iGoal]->destroyers.push_back(ach);
+    //                    }
+    //                }
+    //            }
+    //        }
+    //    }
+    //}
+    //for (int posGoal: task.goal.positive_nullary_goals) {
+    //    goalAchievers->posNullaryPrecAchievers[posGoal] = new LActionPrecAchiever;
+    //    for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+    //        auto possAchAction = task.actions[iPossibleAch];
+    //        if (possAchAction.get_positive_nullary_effects()[posGoal]) {
+    //            LAchiever *ach = new LAchiever;
+    //            ach->action = iPossibleAch;
+    //            goalAchievers->posNullaryPrecAchievers[posGoal]->achievers.push_back(ach);
+    //        }
+    //    }
+    //}
+    //for (int negGoal: task.goal.negative_nullary_goals) {
+    //    goalAchievers->negNullaryPrecAchievers[negGoal] = new LActionPrecAchiever;
+    //    for (tSize iPossibleAch = 0; iPossibleAch < task.actions.size(); iPossibleAch++) {
+    //        auto possAchAction = task.actions[iPossibleAch];
+    //        if (possAchAction.get_negative_nullary_effects()[negGoal]) {
+    //            LAchiever *ach = new LAchiever;
+    //            ach->action = iPossibleAch;
+    //            goalAchievers->negNullaryPrecAchievers[negGoal]->achievers.push_back(ach);
+    //        }
+    //    }
+    //}
 
-    DEBUG(
-    for (auto pred : task.predicates) {
-        cout << pred.getName();
-        for(auto type: pred.getTypes()) {
-            cout << " " << task.type_names[type];
-        }
-        cout << endl;
-    });
+    //DEBUG(
+    //for (auto pred : task.predicates) {
+    //    cout << pred.getName();
+    //    for(auto type: pred.getTypes()) {
+    //        cout << " " << task.type_names[type];
+    //    }
+    //    cout << endl;
+    //});
 
-    // typing needs to be done when the precondition predicate is less specific than the action's parameter type
-    for (size_t iAct = 0; iAct < task.actions.size(); iAct++) {
-        auto precs = task.actions[iAct].get_precondition();
-        auto args = task.actions[iAct].get_parameters();
-        for (size_t iArg = 0; iArg < args.size(); iArg++) {
-            needToType[make_pair(iAct, iArg)] = true;
-        }
-        for (size_t iPrec = 0; iPrec < precs.size(); iPrec++) {
-            auto prec = precs[iPrec];
-            for (size_t iPrecArg = 0; iPrecArg < prec.arguments.size(); iPrecArg++) {
-                if (!prec.arguments[iPrecArg].constant) {
-                    const int var = prec.arguments[iPrecArg].index;
-                    const int actionType = args[var].type;
-                    const int precType = task.predicates[prec.predicate_symbol].getTypes()[iPrecArg];
-                    if (parents[actionType].find(precType) == parents[actionType].end()) {
-                        needToType[make_pair(iAct, var)] = false;
-                    }
-                }
-            }
-        }
-	DEBUG(
-        cout << "action: " << task.actions[iAct].get_name();
-        for (int j = 0; j < args.size(); j++) {
-            if (needToType[make_pair(iAct, j)]) {
-                cout << " T";
-            } else {
-                cout << " F";
-            }
-        }
-        cout << endl;);
+    //// typing needs to be done when the precondition predicate is less specific than the action's parameter type
+    //for (size_t iAct = 0; iAct < task.actions.size(); iAct++) {
+    //    auto precs = task.actions[iAct].get_precondition();
+    //    auto args = task.actions[iAct].get_parameters();
+    //    for (size_t iArg = 0; iArg < args.size(); iArg++) {
+    //        needToType[make_pair(iAct, iArg)] = true;
+    //    }
+    //    for (size_t iPrec = 0; iPrec < precs.size(); iPrec++) {
+    //        auto prec = precs[iPrec];
+    //        for (size_t iPrecArg = 0; iPrecArg < prec.arguments.size(); iPrecArg++) {
+    //            if (!prec.arguments[iPrecArg].constant) {
+    //                const int var = prec.arguments[iPrecArg].index;
+    //                const int actionType = args[var].type;
+    //                const int precType = task.predicates[prec.predicate_symbol].getTypes()[iPrecArg];
+    //                if (parents[actionType].find(precType) == parents[actionType].end()) {
+    //                    needToType[make_pair(iAct, var)] = false;
+    //                }
+    //            }
+    //        }
+    //    }
+	//DEBUG(
+    //    cout << "action: " << task.actions[iAct].get_name();
+    //    for (int j = 0; j < args.size(); j++) {
+    //        if (needToType[make_pair(iAct, j)]) {
+    //            cout << " T";
+    //        } else {
+    //            cout << " F";
+    //        }
+    //    }
+    //    cout << endl;);
 
-    }
+    //}
 
-	DEBUG(
-    cout << "found achievers:" << endl;
-    for (tSize iAction = 0; iAction < task.actions.size(); iAction++) {
-        cout << "- action '" << task.actions[iAction].get_name() << "'";
-        auto precs = task.actions[iAction].get_precondition();
-        int numPrecs = precs.size() + setPosNullaryPrec[iAction]->size() + setNegNullaryPrec[iAction]->size();
-        cout << ", which has " << numPrecs << " preconditions" << endl;
-        for (tSize iPrec = 0; iPrec < precs.size(); iPrec++) {
-            cout << "  - prec: ";
-            if (precs[iPrec].negated) {
-                cout << "not ";
-            }
-            cout << "'" << task.predicates[precs[iPrec].predicate_symbol].getName() << "' achieved by";
-            auto achs = achievers[iAction]->precAchievers[iPrec]->achievers;
-            for (tSize iAchiever = 0; iAchiever < achs.size(); iAchiever++) {
-                auto achieverAction = task.actions[achs[iAchiever]->action];
-                cout << endl << "    - '" << achieverAction.get_name() << "'";
-                cout << " eff: " << achs[iAchiever]->effect;
-                cout << " pred: '"
-                     << task.predicates[achieverAction.get_effects()[achs[iAchiever]->effect].predicate_symbol].getName()
-                     << "'";
-            }
-            if (achs.empty()) { cout << " s0 only."; }
-            cout << endl;
-        }
-        for (int iPrec: *setPosNullaryPrec[iAction]) {
-            cout << "  - prec: nullary" << iPrec;
-            auto achs = achievers[iAction]->posNullaryPrecAchievers[iPrec]->achievers;
-            for (auto ach: achs) {
-                auto achieverAction = task.actions[ach->action];
-                cout << endl << "    - '" << achieverAction.get_name() << "'";
-            }
-        }
-        for (int iPrec: *setNegNullaryPrec[iAction]) {
-            cout << "  - prec: not nullary" << iPrec;
-            auto achs = achievers[iAction]->negNullaryPrecAchievers[iPrec]->achievers;
-            for (auto ach: achs) {
-                auto achieverAction = task.actions[ach->action];
-                cout << endl << "    - '" << achieverAction.get_name() << "'";
-            }
-        }
-    }
+	//DEBUG(
+    //cout << "found achievers:" << endl;
+    //for (tSize iAction = 0; iAction < task.actions.size(); iAction++) {
+    //    cout << "- action '" << task.actions[iAction].get_name() << "'";
+    //    auto precs = task.actions[iAction].get_precondition();
+    //    int numPrecs = precs.size() + setPosNullaryPrec[iAction]->size() + setNegNullaryPrec[iAction]->size();
+    //    cout << ", which has " << numPrecs << " preconditions" << endl;
+    //    for (tSize iPrec = 0; iPrec < precs.size(); iPrec++) {
+    //        cout << "  - prec: ";
+    //        if (precs[iPrec].negated) {
+    //            cout << "not ";
+    //        }
+    //        cout << "'" << task.predicates[precs[iPrec].predicate_symbol].getName() << "' achieved by";
+    //        auto achs = achievers[iAction]->precAchievers[iPrec]->achievers;
+    //        for (tSize iAchiever = 0; iAchiever < achs.size(); iAchiever++) {
+    //            auto achieverAction = task.actions[achs[iAchiever]->action];
+    //            cout << endl << "    - '" << achieverAction.get_name() << "'";
+    //            cout << " eff: " << achs[iAchiever]->effect;
+    //            cout << " pred: '"
+    //                 << task.predicates[achieverAction.get_effects()[achs[iAchiever]->effect].predicate_symbol].getName()
+    //                 << "'";
+    //        }
+    //        if (achs.empty()) { cout << " s0 only."; }
+    //        cout << endl;
+    //    }
+    //    for (int iPrec: *setPosNullaryPrec[iAction]) {
+    //        cout << "  - prec: nullary" << iPrec;
+    //        auto achs = achievers[iAction]->posNullaryPrecAchievers[iPrec]->achievers;
+    //        for (auto ach: achs) {
+    //            auto achieverAction = task.actions[ach->action];
+    //            cout << endl << "    - '" << achieverAction.get_name() << "'";
+    //        }
+    //    }
+    //    for (int iPrec: *setNegNullaryPrec[iAction]) {
+    //        cout << "  - prec: not nullary" << iPrec;
+    //        auto achs = achievers[iAction]->negNullaryPrecAchievers[iPrec]->achievers;
+    //        for (auto ach: achs) {
+    //            auto achieverAction = task.actions[ach->action];
+    //            cout << endl << "    - '" << achieverAction.get_name() << "'";
+    //        }
+    //    }
+    //}
 
-    cout << "goal achievers:" << endl;
-    for (tSize iGoal = 0; iGoal < task.goal.goal.size(); iGoal++) {
-        cout << "- goal ";
-        if (task.goal.goal[iGoal].negated) {
-            cout << "not ";
-        }
-        cout << "'" << task.predicates[task.goal.goal[iGoal].predicate].getName() << "'";
-        for (tSize iAchiever = 0; iAchiever < goalAchievers->precAchievers[iGoal]->achievers.size(); iAchiever++) {
-            auto ach = goalAchievers->precAchievers[iGoal]->achievers[iAchiever];
-            auto achieverAction = task.actions[ach->action];
-            cout << endl << "    - '" << achieverAction.get_name() << "'";
-            cout << " eff: " << ach->effect;
-            cout << " pred: '" << task.predicates[achieverAction.get_effects()[ach->effect].predicate_symbol].getName()
-                 << "'";
-        }
-        if (goalAchievers->precAchievers[iGoal]->achievers.empty()) { cout << " s0 only."; }
-        cout << endl;
-    }
-    for (int g: task.goal.positive_nullary_goals) {
-        cout << "  - prec: nullary" << g;
-        auto achs = goalAchievers->posNullaryPrecAchievers[g]->achievers;
-        for (auto ach: achs) {
-            auto achieverAction = task.actions[ach->action];
-            cout << endl << "    - '" << achieverAction.get_name() << "'";
-        }
-    }
-    for (int g: task.goal.negative_nullary_goals) {
-        cout << "  - prec: not nullary" << g;
-        auto achs = goalAchievers->negNullaryPrecAchievers[g]->achievers;
-        for (auto ach: achs) {
-            auto achieverAction = task.actions[ach->action];
-            cout << endl << "    - '" << achieverAction.get_name() << "'";
-        }
-    });
+    //cout << "goal achievers:" << endl;
+    //for (tSize iGoal = 0; iGoal < task.goal.goal.size(); iGoal++) {
+    //    cout << "- goal ";
+    //    if (task.goal.goal[iGoal].negated) {
+    //        cout << "not ";
+    //    }
+    //    cout << "'" << task.predicates[task.goal.goal[iGoal].predicate].getName() << "'";
+    //    for (tSize iAchiever = 0; iAchiever < goalAchievers->precAchievers[iGoal]->achievers.size(); iAchiever++) {
+    //        auto ach = goalAchievers->precAchievers[iGoal]->achievers[iAchiever];
+    //        auto achieverAction = task.actions[ach->action];
+    //        cout << endl << "    - '" << achieverAction.get_name() << "'";
+    //        cout << " eff: " << ach->effect;
+    //        cout << " pred: '" << task.predicates[achieverAction.get_effects()[ach->effect].predicate_symbol].getName()
+    //             << "'";
+    //    }
+    //    if (goalAchievers->precAchievers[iGoal]->achievers.empty()) { cout << " s0 only."; }
+    //    cout << endl;
+    //}
+    //for (int g: task.goal.positive_nullary_goals) {
+    //    cout << "  - prec: nullary" << g;
+    //    auto achs = goalAchievers->posNullaryPrecAchievers[g]->achievers;
+    //    for (auto ach: achs) {
+    //        auto achieverAction = task.actions[ach->action];
+    //        cout << endl << "    - '" << achieverAction.get_name() << "'";
+    //    }
+    //}
+    //for (int g: task.goal.negative_nullary_goals) {
+    //    cout << "  - prec: not nullary" << g;
+    //    auto achs = goalAchievers->negNullaryPrecAchievers[g]->achievers;
+    //    for (auto ach: achs) {
+    //        auto achieverAction = task.actions[ach->action];
+    //        cout << endl << "    - '" << achieverAction.get_name() << "'";
+    //    }
+    //});
 
     // make directional if there are multiple identical types
 	for (int i = 0; i < numTypes; i++) {
@@ -523,7 +573,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 
     cout << "- num actions " << numActions << endl;
     cout << "- num objects " << numObjs << endl;
-    cout << "- max arity " << maxArity << endl;
+    cout << "- max arity " << maxActionArity << endl;
 
     for (tSize i = 0; i < task.predicates.size(); i++) {
         cout << i << " " << task.predicates[i].getName() << " isStatic " << task.predicates[i].isStaticPredicate() << endl;
@@ -557,128 +607,148 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
     }
 	);
 
-
-	supportingTuples.resize(task.actions.size());
-	deletedTuples.resize(task.actions.size());
-	for (size_t action = 0; action < task.actions.size(); action++){
-        const auto precs = task.actions[action].get_precondition();
-		
-		supportingTuples[action].resize(precs.size());
-        for (size_t prec = 0; prec < precs.size(); prec++) {
-        	DEBUG(cout << "\t\tprecondition #" << prec << endl);
-        	
-			const auto & precObjec = precs[prec];
-			int predicate = precObjec.predicate_symbol;
-			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
-			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue;
-
-
-			vector<pair<vector<int>,int>> & mySupportingTuples = supportingTuples[action][prec];
-
-			// TODO: sind die nicht nach den predikaten sortiert????
-			for (size_t i = 0; i < task.get_static_info().get_relations().size(); i++) {
-			    auto rel = task.get_static_info().get_relations()[i];
-			    auto tuple = task.get_static_info().get_tuples_of_relation(i);
-
-				if (predicate != rel.predicate_symbol) continue;
-				
-				// this is the correct predicate
-			    for (vector<int> groundA: tuple) {
-					bool notApplicable = false;
-					for (size_t j = 0; j < groundA.size(); j++){
-						int myObjIndex = objToIndex[groundA[j]];
-						if (precObjec.arguments[j].constant){
-							if (precObjec.arguments[j].index != groundA[j])
-								notApplicable = true;
-						} else {
-							int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
-							if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
-									myObjIndex > upperTindex[typeOfArgument[myParam]])
-								notApplicable = true;
-						}
-					}
-			    	
-					if (notApplicable) continue;
-					mySupportingTuples.push_back({groundA,-1}); // static ..
-				}
-			}
-
-			int currentStartingPos = 0;
-			for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
-			    auto rel = task.initial_state.get_relations()[i];
-			    auto tuple = task.initial_state.get_tuples_of_relation(i);
-				
-				if (predicate != rel.predicate_symbol) {
-					currentStartingPos += tuple.size();
-					continue;
-				}
-			    
-				for (vector<int> groundA: tuple) {
-					bool notApplicable = false;
-					for (size_t j = 0; j < groundA.size(); j++){
-						int myObjIndex = objToIndex[groundA[j]];
-						if (precObjec.arguments[j].constant){
-							if (precObjec.arguments[j].index != groundA[j])
-								notApplicable = true;
-						} else {
-							int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
-							if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
-									myObjIndex > upperTindex[typeOfArgument[myParam]])
-								notApplicable = true;
-						}
-					}
-			    	
-					if (notApplicable) {
-						currentStartingPos++;
-						continue;
-					}
-			    	mySupportingTuples.push_back({groundA,currentStartingPos++});
-			    }
-			}
-		}
-
-		deletedTuples[action].resize(task.actions[action].get_effects().size());
-        for (tSize ie = 0; ie < task.actions[action].get_effects().size(); ie++) {
-            auto eff = task.actions[action].get_effects()[ie];
-			if (!eff.negated) continue; // only negative effects can delete init facts
-			int predicate = eff.predicate_symbol;
-
-			//// gather the possibly deleted facts
-			int currentStartingPos = 0;
-			for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
-			    auto rel = task.initial_state.get_relations()[i];
-			    auto tuple = task.initial_state.get_tuples_of_relation(i);
-				
-				if (predicate != rel.predicate_symbol) {
-					currentStartingPos += tuple.size();
-					continue;
-				}
+	/////////////////////////// lookup table for the support from the initial state
+	supportingPredicateTuples.resize(task.predicates.size());
+	for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
+		vector<pair<vector<int>,int>> & mySupportingTuples = supportingPredicateTuples[predicate];
+		int currentStartingPos = 0;
+		for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
+		    auto rel = task.initial_state.get_relations()[i];
+		    auto tuple = task.initial_state.get_tuples_of_relation(i);
 			
-				vector<pair<vector<int>,int>> & possiblyDeletedTuples = deletedTuples[action][ie];
-				for (vector<int> groundA: tuple) {
-					bool notApplicable = false;
-					for (size_t j = 0; j < groundA.size(); j++){
-						int myObjIndex = objToIndex[groundA[j]];
-						if (eff.arguments[j].constant){
-							if (eff.arguments[j].index != groundA[j])
-								notApplicable = true;
-						} else {
-							int myParam = actionArgumentPositions[action][eff.arguments[j].index];
-							if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
-									myObjIndex > upperTindex[typeOfArgument[myParam]])
-								notApplicable = true;
-						}
-					}
-			    	
-					if (notApplicable) {
-						currentStartingPos++;
-						continue;
-					}
-			    	possiblyDeletedTuples.push_back({groundA,currentStartingPos++});
-			    }
+			if (predicate != rel.predicate_symbol) {
+				currentStartingPos += tuple.size();
+				continue;
 			}
+		    
+			for (vector<int> groundA: tuple) {
+		    	mySupportingTuples.push_back({groundA,currentStartingPos++});
+		    }
 		}
 	}
+
+
+	//supportingTuples.resize(task.actions.size());
+	//deletedTuples.resize(task.actions.size());
+	//for (size_t action = 0; action < task.actions.size(); action++){
+    //    const auto precs = task.actions[action].get_precondition();
+	//	
+	//	supportingTuples[action].resize(precs.size());
+    //    for (size_t prec = 0; prec < precs.size(); prec++) {
+    //    	DEBUG(cout << "\t\tprecondition #" << prec << endl);
+    //    	
+	//		const auto & precObjec = precs[prec];
+	//		int predicate = precObjec.predicate_symbol;
+	//		if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
+	//		if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue;
+
+
+	//		vector<pair<vector<int>,int>> & mySupportingTuples = supportingTuples[action][prec];
+
+	//		// TODO: sind die nicht nach den predikaten sortiert????
+	//		for (size_t i = 0; i < task.get_static_info().get_relations().size(); i++) {
+	//		    auto rel = task.get_static_info().get_relations()[i];
+	//		    auto tuple = task.get_static_info().get_tuples_of_relation(i);
+
+	//			if (predicate != rel.predicate_symbol) continue;
+	//			
+	//			// this is the correct predicate
+	//		    for (vector<int> groundA: tuple) {
+	//				bool notApplicable = false;
+	//				for (size_t j = 0; j < groundA.size(); j++){
+	//					int myObjIndex = objToIndex[groundA[j]];
+	//					if (precObjec.arguments[j].constant){
+	//						if (precObjec.arguments[j].index != groundA[j])
+	//							notApplicable = true;
+	//					} else {
+//						int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+	//						if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
+	//								myObjIndex > upperTindex[typeOfArgument[myParam]])
+	//							notApplicable = true;
+	//					}
+	//				}
+	//		    	
+	//				if (notApplicable) continue;
+	//				mySupportingTuples.push_back({groundA,-1}); // static ..
+	//			}
+	//		}
+
+	//		int currentStartingPos = 0;
+	//		for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
+	//		    auto rel = task.initial_state.get_relations()[i];
+	//		    auto tuple = task.initial_state.get_tuples_of_relation(i);
+	//			
+	//			if (predicate != rel.predicate_symbol) {
+	//				currentStartingPos += tuple.size();
+	//				continue;
+	//			}
+	//		    
+	//			for (vector<int> groundA: tuple) {
+	//				bool notApplicable = false;
+	//				for (size_t j = 0; j < groundA.size(); j++){
+	//					int myObjIndex = objToIndex[groundA[j]];
+	//					if (precObjec.arguments[j].constant){
+	//						if (precObjec.arguments[j].index != groundA[j])
+	//							notApplicable = true;
+	//					} else {
+	//						int myParam = actionArgumentPositions[action][precObjec.arguments[j].index];
+	//						if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
+	//								myObjIndex > upperTindex[typeOfArgument[myParam]])
+	//							notApplicable = true;
+	//					}
+	//				}
+	//		    	
+	//				if (notApplicable) {
+	//					currentStartingPos++;
+	//					continue;
+	//				}
+	//		    	mySupportingTuples.push_back({groundA,currentStartingPos++});
+	//		    }
+	//		}
+	//	}
+
+	//	deletedTuples[action].resize(task.actions[action].get_effects().size());
+    //    for (tSize ie = 0; ie < task.actions[action].get_effects().size(); ie++) {
+    //        auto eff = task.actions[action].get_effects()[ie];
+	//		if (!eff.negated) continue; // only negative effects can delete init facts
+	//		int predicate = eff.predicate_symbol;
+
+	//		//// gather the possibly deleted facts
+	//		int currentStartingPos = 0;
+	//		for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
+	//		    auto rel = task.initial_state.get_relations()[i];
+	//		    auto tuple = task.initial_state.get_tuples_of_relation(i);
+	//			
+	//			if (predicate != rel.predicate_symbol) {
+	//				currentStartingPos += tuple.size();
+	//				continue;
+	//			}
+	//		
+	//			vector<pair<vector<int>,int>> & possiblyDeletedTuples = deletedTuples[action][ie];
+	//			for (vector<int> groundA: tuple) {
+	//				bool notApplicable = false;
+	//				for (size_t j = 0; j < groundA.size(); j++){
+	//					int myObjIndex = objToIndex[groundA[j]];
+	//					if (eff.arguments[j].constant){
+	//						if (eff.arguments[j].index != groundA[j])
+	//							notApplicable = true;
+	//					} else {
+	//						int myParam = actionArgumentPositions[action][eff.arguments[j].index];
+	//						if (myObjIndex < lowerTindex[typeOfArgument[myParam]] ||
+	//								myObjIndex > upperTindex[typeOfArgument[myParam]])
+	//							notApplicable = true;
+	//					}
+	//				}
+	//		    	
+	//				if (notApplicable) {
+	//					currentStartingPos++;
+	//					continue;
+	//				}
+	//		    	possiblyDeletedTuples.push_back({groundA,currentStartingPos++});
+	//		    }
+	//		}
+	//	}
+	//}
 }
 
 void printVariableTruth(void* solver, sat_capsule & capsule);
@@ -733,6 +803,9 @@ extern std::vector<std::vector<std::vector<int>>> precSupporterOver;
 extern double solverTotal;
 
 
+int predicateTyping = 0;
+int atMostOnePredicate = 0;
+
 extern int actionTyping;
 extern int atMostOneParamterValue;
 extern int variableInitMaintenance; 
@@ -749,6 +822,269 @@ extern int goalAchiever;
 extern int goalDeleter; 
 
 
+vector<vector<vector<int>>> predicateSlotVariables; // time -> slot -> predicate (contains -1 for static one)
+vector<vector<vector<vector<int>>>> argumentSlotVariables; // time -> slot -> position -> constant (0 is the first possible one)
+
+vector<vector<vector<int>>> LiftedLinearSAT::generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int actionTime, int stateTime){
+
+	// variables for argument pos X = slot Y parameter pos Z
+	vector<vector<vector<int>>> equalsVars;
+
+	int bef = get_number_of_clauses();
+    for (int actionParamter = 0; actionParamter < numberOfArgumentPositions; actionParamter++){
+		vector<vector<int>> eqVars;
+		for (int slot = 0; slot < width; slot++){
+			vector<int> eqVarsSlot;
+	   		for (int factParameter = 0; factParameter < numberOfPredicateArgumentPositions; factParameter++){
+				int equalsVar = capsule.new_variable();
+				eqVarsSlot.push_back(equalsVar);
+				DEBUG(capsule.registerVariable(equalsVar, to_string(actionTime) + " @ # " +to_string(actionParamter)+" = "	+ to_string(stateTime) + " @ # " + to_string(factParameter)));
+
+				int thisLower = lowerTindex[typeOfArgument[actionParamter]];
+				int beforeLower = lowerTindex[typeOfPredicateArgument[factParameter]];
+				int thisUpper = upperTindex[typeOfArgument[actionParamter]];
+				int beforeUpper = upperTindex[typeOfPredicateArgument[factParameter]];
+	
+	
+				for(int o = 0; o < numObjs; o++){
+					if (o < thisLower || o > thisUpper){
+						if (o >= beforeLower && o <= beforeUpper)
+							impliesNot(solver,equalsVar, argumentSlotVariables[stateTime][slot][factParameter][o-beforeLower]);
+					}
+					if (o < beforeLower || o > beforeUpper){
+						if (o >= thisLower && o <= thisUpper)
+							impliesNot(solver,equalsVar, parameterVars[actionTime][actionParamter][o-thisLower]);
+					}
+				
+					// this could actually be the constant that makes them equal	
+					if (o >= thisLower && o <= thisUpper && o >= beforeLower && o <= beforeUpper){
+						// need to subtract the starting values of the types
+						andImplies(solver,equalsVar, parameterVars[actionTime][actionParamter][o-thisLower], argumentSlotVariables[stateTime][slot][factParameter][o-beforeLower]);
+						andImplies(solver,equalsVar, argumentSlotVariables[stateTime][slot][factParameter][o-beforeLower], parameterVars[actionTime][actionParamter][o-thisLower]);
+						andImplies(solver,argumentSlotVariables[stateTime][slot][factParameter][o-beforeLower], parameterVars[actionTime][actionParamter][o-thisLower], equalsVar);
+					}
+				}
+			}
+			eqVars.push_back(eqVarsSlot);
+		}
+		equalsVars.push_back(eqVars);
+	}
+	equals += get_number_of_clauses() - bef;
+	return equalsVars;
+}
+
+
+void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solver, sat_capsule & capsule, int width, int time){
+
+	vector<vector<int>> thisTimePredicateSlotVariables; // slot -> predicate (contains -1 for static one)
+	vector<vector<vector<int>>> thisTimeArgumentSlotVariables; // slot -> position -> constant (0 is the first possible one)
+	
+	for (int slot = 0; slot < width; slot++){
+		DEBUG(cout << "\tSlot " << slot << endl);
+
+		// predicates
+		vector<int> thisSlotPredicates;
+		vector<int> thisSlotPredicatesAMO; // second copy without -1s
+		for (int predicate = 0; predicate < int(task.predicates.size()); predicate++){
+			if (task.predicates[predicate].getName().rfind("type@", 0) == 0 || 
+				task.predicates[predicate].getName().rfind("=", 0) == 0||
+				task.predicates[predicate].isStaticPredicate()) {
+				thisSlotPredicates.push_back(-1);
+				continue; 
+			}
+			int predicateVar = capsule.new_variable();
+			thisSlotPredicates.push_back(predicateVar);
+			thisSlotPredicatesAMO.push_back(predicateVar);
+			DEBUG(capsule.registerVariable(predicateVar, to_string(time) + " @ slot " + to_string(slot) + " predicate " + task.predicates[predicate].getName()));
+		}
+		int bef = get_number_of_clauses();
+		atMostOne(solver,capsule,thisSlotPredicatesAMO);
+		atLeastOne(solver,capsule,thisSlotPredicatesAMO);
+		assertYes(solver,thisSlotPredicatesAMO[0]);
+		bef = get_number_of_clauses();
+		
+		thisTimePredicateSlotVariables.push_back(thisSlotPredicates);
+
+		// This slot parameters
+		std::vector<std::vector<int>> thisSlotParameterVars(numberOfPredicateArgumentPositions);
+    	for (int paramter = 0; paramter < numberOfPredicateArgumentPositions; paramter++){
+			int type = typeOfPredicateArgument[paramter];
+			int lower = lowerTindex[type];
+			int upper = upperTindex[type];
+			
+			thisSlotParameterVars[paramter].resize(upper - lower + 1);
+
+			for (int o = 0; o < upper - lower + 1; o++){
+				int objectVar = capsule.new_variable();
+				thisSlotParameterVars[paramter][o] = objectVar;
+				DEBUG(capsule.registerVariable(objectVar, to_string(time) + " @ slot " + to_string(slot) + " argument#" + to_string(paramter) + " = const " + task.objects[indexToObj[o + lower]].getName()));
+			}
+			// each parameter can have at most one value
+			atMostOne(solver,capsule,thisSlotParameterVars[paramter]);
+		}
+		thisTimeArgumentSlotVariables.push_back(thisSlotParameterVars);
+
+		atMostOneParamterValue += get_number_of_clauses() - bef;
+		bef = get_number_of_clauses();
+
+		// predicate types must be correct
+		for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
+			if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
+			int predicateVar = thisSlotPredicates[predicate];
+    	    DEBUG(cout << "\t" << time << " " << slot << " " << predicate << " " << task.predicates[predicate].getName() << " = " << predicateVar << endl);
+			
+			// typing implications!
+			auto params = task.predicates[predicate].getTypes();
+    	    for (size_t l = 0; l < params.size(); l++) {
+				int thisParameterIndex = predicateArgumentPositions[predicate][l];
+    	        DEBUG(cout << "\t\t" << task.type_names[params[l]] << ": ");
+				
+				int lower = lowerTindex[params[l]];
+    	        int upper = upperTindex[params[l]];
+    	        DEBUG(for (int m = lower; m <= upper; m++) {
+    	            cout << task.objects[indexToObj[m]].getName() << " ";
+    	        }
+    	        cout << endl);
+
+				// alternative encoding ...
+				//for (int i = 0; i < lower; i++){
+				//	int parameterConstantVar = parameterVars[time][l][i];
+				//	impliesNot(solver,actionVar,parameterConstantVar);
+				//}
+				//for (int i = upper + 1; i < int(task.objects.size()); i++){
+				//	int parameterConstantVar = parameterVars[time][l][i];
+				//	impliesNot(solver,actionVar,parameterConstantVar);
+				//}
+
+				std::vector<int> allowed;
+				for (int i = 0; i <= upper - lower; i++){
+					int parameterConstantVar = thisSlotParameterVars[thisParameterIndex][i];
+					allowed.push_back(parameterConstantVar);
+				}
+				DEBUG(cout << "Typing " << predicateVar << ":"; for(auto x : allowed) cout << " " << x; cout << endl;);
+				impliesOr(solver,predicateVar,allowed);
+    	    }
+		}
+		predicateTyping += get_number_of_clauses() - bef;
+
+
+
+		// maybe select from init
+		bef = get_number_of_clauses();
+		if (time == 0){
+			for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
+				if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
+
+				// consider how many arguments are there
+				int predicateVar = thisSlotPredicates[predicate];
+				cout << "PREDICATE VAR " << predicateVar << endl;
+				if (task.predicates[predicate].getArity() == 1){
+					vector<int> possibleValues;
+					
+					for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
+						vector<int> tuple = supportingPredicateTuples[predicate][i].first;
+					
+						int myObjIndex = objToIndex[tuple[0]];
+						int myParam = predicateArgumentPositions[predicate][i];
+						int constantVar = thisSlotParameterVars[myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+						
+						possibleValues.push_back(constantVar);
+					}
+				
+					impliesOr(solver,predicateVar,possibleValues);
+				} else {
+					for (size_t lastPos = 0; lastPos < task.predicates[predicate].getArity() - 1 ; lastPos++){
+						map<vector<int>,set<int>> possibleUpto;
+				
+						// build assignment tuple up to this point
+						for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
+							vector<int> tuple = supportingPredicateTuples[predicate][i].first;
+							vector<int> subTuple;
+							subTuple.push_back(predicateVar);
+						
+							for (size_t j = 0; j <= lastPos; j++){
+								// push only the non-constants
+								int myObjIndex = objToIndex[tuple[j]];
+								int myParam = predicateArgumentPositions[predicate][j];
+								int constantVar = thisSlotParameterVars[myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+								
+								subTuple.push_back(constantVar);
+							}
+							
+							int myObjIndex = objToIndex[tuple[lastPos + 1]];
+							int myParam = predicateArgumentPositions[predicate][lastPos+1];
+							int localObjectNumber = myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]];
+							//if (localObjectNumber >= parameterVars[time][myParam].size()) cout << "F " << localObjectNumber << " " << parameterVars[time][myParam].size() << endl;
+							int constantVar = thisSlotParameterVars[myParam][localObjectNumber];
+				
+							possibleUpto[subTuple].insert(constantVar);
+						}
+				
+				
+						for (auto & x : possibleUpto){
+							andImpliesOr(solver,x.first,x.second);
+							DEBUG(for (int i : x.first) cout << " - [" << capsule.variableNames[i] << "]";
+							for (int i : x.second) cout << " [" << capsule.variableNames[i] << "]";
+							cout << endl);
+						}
+				
+						if (lastPos == 0){
+							int posOfValue = 1;
+							vector<int> initial;
+							for (auto & x : possibleUpto)
+								initial.push_back(x.first[posOfValue]);
+							
+							impliesOr(solver,predicateVar,initial);
+							DEBUG(cout << "- [" << capsule.variableNames[predicateVar] << "]";
+							for (int i : initial) cout << " [" << capsule.variableNames[i] << "]";
+							cout << endl);
+						}
+					}
+				}
+			}
+		}
+		//exit(0);
+		initSupp += get_number_of_clauses() - bef;
+	}
+	predicateSlotVariables.push_back(thisTimePredicateSlotVariables);
+	argumentSlotVariables.push_back(thisTimeArgumentSlotVariables);
+}
+
+
+void LiftedLinearSAT::generate_goal_assertion(const Task &task, void* solver, sat_capsule & capsule, int width, int time){
+	const auto goals = task.goal.goal;
+	for (size_t goal = 0; goal < goals.size(); goal++) {
+		const auto & goalObjec = goals[goal];
+		int predicate = goalObjec.predicate;
+	
+		if (task.predicates[predicate].isStaticPredicate()){
+			// static preconditions must be handled more efficiently
+			// i.e. directly via support from init
+			// TODO
+		} else {
+			vector<int> goalSlotVars;
+			for (int slot = 0; slot < width; slot++){
+				int goalSlotVar = capsule.new_variable();
+				goalSlotVars.push_back(goalSlotVar);
+				DEBUG(capsule.registerVariable(goalSlotVar,to_string(time) + " @ goal " + to_string(goal) + " slot " + to_string(slot)));
+	
+				// if we select this slot, we actually have to have the correct fact there
+				implies(solver, goalSlotVar, predicateSlotVariables[time][slot][predicate]);
+	
+				// iterate over the arguments of the precondition
+				for (size_t iArg = 0; iArg < goalObjec.args.size(); iArg++){
+					int preconditionVar = goalObjec.args[iArg];
+					int myParam = predicateArgumentPositions[predicate][iArg];
+	
+					int myObjIndex = objToIndex[preconditionVar]; 
+					int constantVar = argumentSlotVariables[time][slot][myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+					implies(solver, goalSlotVar, constantVar); 
+				}
+			}
+			atLeastOne(solver,capsule,goalSlotVars);
+		}
+	}
+}
 
 // Generator function for the formula.
 // This function generates *one* time step of the formula
@@ -762,43 +1098,64 @@ extern int goalDeleter;
 //                       false -> generate the formula with assumptions instead of hard constraints
 // pastIncremental - true -> we are in an incremental run over the ACD
 
-void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsule & capsule) {
+void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsule & capsule, int width) {
 	bool generateBaseFormula = true; // this is for later. Set to false for incremental?
-
 
 	int bef = get_number_of_clauses();
 	// indices: timestep -> parameter -> object
 	int time = planLength-1;
 	cout << "Generating time = " << setw(3) << time << endl;
 
+
+	/// action variables
+	std::vector<int> actionVarsTime;
+	DEBUG(cout << "\tGenerating Variables for actions." << endl);
+	for (size_t action = 0; action < task.actions.size(); action++){
+
+		int actionVar;
+		if (generateBaseFormula){  
+			actionVar = capsule.new_variable();
+			actionVarsTime.push_back(actionVar);
+			DEBUG(capsule.registerVariable(actionVar,to_string(time) + " @ action" + "-" + task.actions[action].get_name()));
+		} else {
+			actionVar = actionVars[time][action];
+		}
+	}
+	// add variables to overall list (needed for later retrieval)
+	actionVars.push_back(actionVarsTime);
+	if (generateBaseFormula) atMostOne(solver,capsule,actionVarsTime);
+	if (generateBaseFormula) atLeastOne(solver,capsule,actionVarsTime);
+
 	// generate nullary variables
 	std::unordered_map<int,int> currentNullary;
-	
+
+
+	// generate	varialbes for the action parameters
 	if (generateBaseFormula){
 		for (int n : task.nullary_predicates){
 			int nullVar = capsule.new_variable();
 			currentNullary[n] = nullVar;
-			DEBUG(capsule.registerVariable(nullVar,	"nullary#" + to_string(n) + "_" + to_string(time)));
+			DEBUG(capsule.registerVariable(nullVar,	to_string(time) + " @ nullary#" + to_string(n)));
 		}
 
-
-		std::vector<int> initNotTrueAfterThis;
-		for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
-		    auto rel = task.initial_state.get_relations()[i];
-		    auto tuple = task.initial_state.get_tuples_of_relation(i);
-			
-			for (size_t j = 0; j < tuple.size(); j++){
-				int initAtom = capsule.new_variable();
-				DEBUG(capsule.registerVariable(initAtom, "initAtomFalseAfter@" + to_string(time) + "#" + to_string(i) + "-" + to_string(j)));
-				// if init atom as false after previous step, it is false now!
-				if (initNotTrueAfter.size())
-					implies(solver,initNotTrueAfter.back()[initNotTrueAfterThis.size()],initAtom);
-				initNotTrueAfterThis.push_back(initAtom);
-			}
-		}
-		initNotTrueAfter.push_back(initNotTrueAfterThis);
-		bef = get_number_of_clauses();
-		variableInitMaintenance += get_number_of_clauses() - bef;
+		//// code for maintenance of truth of init
+		//std::vector<int> initNotTrueAfterThis;
+		//for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
+		//    auto rel = task.initial_state.get_relations()[i];
+		//    auto tuple = task.initial_state.get_tuples_of_relation(i);
+		//	
+		//	for (size_t j = 0; j < tuple.size(); j++){
+		//		int initAtom = capsule.new_variable();
+		//		DEBUG(capsule.registerVariable(initAtom, to_string(time) +"@initAtomFalseAfter" + "#" + to_string(i) + "-" + to_string(j)));
+		//		// if init atom as false after previous step, it is false now!
+		//		if (initNotTrueAfter.size())
+		//			implies(solver,initNotTrueAfter.back()[initNotTrueAfterThis.size()],initAtom);
+		//		initNotTrueAfterThis.push_back(initAtom);
+		//	}
+		//}
+		//initNotTrueAfter.push_back(initNotTrueAfterThis);
+		//bef = get_number_of_clauses();
+		//variableInitMaintenance += get_number_of_clauses() - bef;
 
 		std::vector<std::vector<int>> parameterVarsTime(numberOfArgumentPositions);
     	for (int paramter = 0; paramter < numberOfArgumentPositions; paramter++){
@@ -811,7 +1168,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			for (int o = 0; o < upper - lower + 1; o++){
 				int objectVar = capsule.new_variable();
 				parameterVarsTime[paramter][o] = objectVar;
-				DEBUG(capsule.registerVariable(objectVar, "const@" + to_string(time) + "#" + to_string(paramter) + "-" + task.objects[indexToObj[o + lower]].getName()));
+				DEBUG(capsule.registerVariable(objectVar, to_string(time) + " @ param#" + to_string(paramter) + " = const " + task.objects[indexToObj[o + lower]].getName()));
 			}
 			// each parameter can have at most one value
 			atMostOne(solver,capsule,parameterVarsTime[paramter]);
@@ -820,73 +1177,17 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 		atMostOneParamterValue += get_number_of_clauses() - bef;
 		bef = get_number_of_clauses();
-
-		/// General supporter selection (no specific precondition is considered here)
-		std::vector<std::vector<int>> precSupporterThisTime;
-		// precondition support selection
-		for (int p = 0; p < maxPrec; p++){
-			std::vector<int> precSupporterPrec;
-			for (int pTime = -1; pTime < time; pTime++){
-				int preSuppVar = capsule.new_variable();
-				precSupporterPrec.push_back(preSuppVar);
-				DEBUG(capsule.registerVariable(preSuppVar, "preSupp@" + to_string(time) + "#" + to_string(p) + "-" + to_string(pTime)));
-			}
-
-			precSupporterThisTime.push_back(precSupporterPrec);
-		}
-		precSupporter.push_back(precSupporterThisTime);
-
-		/// variables stating over which variables a support spans
-		// precSupporterOver[p][ptime] is true if there is support for precondition p spanning *over* time ptime
-		std::vector<std::vector<int>> precSupporterOverThisTime;
-		for (int p = 0; p < maxPrec; p++){
-			std::vector<int> supportOver;
-			for (int pTime = 0; pTime < time; pTime++){
-				int overVar = capsule.new_variable();
-				implies(solver,precSupporter[time][p][pTime], overVar);
-				if (pTime > 0)
-					implies(solver,supportOver.back(),overVar);
-				
-				supportOver.push_back(overVar);
-				DEBUG(capsule.registerVariable(overVar, "supportOver@" + to_string(time) + "#" + to_string(p) + "-" + to_string(pTime)));
-			}
-
-			precSupporterOverThisTime.push_back(supportOver);
-		}
-		precSupporterOver.push_back(precSupporterOverThisTime);
-
-		precSupport += get_number_of_clauses() - bef;
-		bef = get_number_of_clauses();
-	}	
-	
-
-
-
-
-
-
-
+	}
 
 	/// action variables
-	std::vector<int> actionVarsTime;
+	bef = get_number_of_clauses();
 	for (size_t action = 0; action < task.actions.size(); action++){
-          DEBUG(cout << "\t" << task.actions[action].get_name() << endl);
-
-		int actionVar;
-		if (generateBaseFormula){  
-			actionVar = capsule.new_variable();
-			actionVarsTime.push_back(actionVar);
-			DEBUG(capsule.registerVariable(actionVar,"action@" + to_string(time) + "-" + task.actions[action].get_name()));
-		} else {
-			actionVar = actionVars[time][action];
-		}
-		// add
-		actionVars.push_back(actionVarsTime);
-	
-		bef = get_number_of_clauses();
+		int actionVar = actionVars[time][action];
+        DEBUG(cout << "\t" << time << " " << action << " " << task.actions[action].get_name() << " = " << actionVar << endl);
+		
 
 		// typing implications!
-          auto params = task.actions[action].get_parameters();
+		auto params = task.actions[action].get_parameters();
 		if (generateBaseFormula){
           	for (size_t l = 0; l < params.size(); l++) {
 				int thisParameterIndex = actionArgumentPositions[action][l];
@@ -918,62 +1219,280 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 					int parameterConstantVar = parameterVars[time][thisParameterIndex][i];
 					allowed.push_back(parameterConstantVar);
 				}
+				DEBUG(cout << "Typing " << actionVar << ":"; for(auto x : allowed) cout << " " << x; cout << endl;);
 				impliesOr(solver,actionVar,allowed);
           	}
 		}
+	}
+	actionTyping += get_number_of_clauses() - bef;
+
+	generate_predicate_slot_layer(task, solver, capsule, width, time+1); // generate effect slots
+	vector<vector<vector<int>>> equalBefore = generate_action_state_equality(task, solver, capsule, width, time, time);
+	vector<vector<vector<int>>> equalAfter = generate_action_state_equality(task, solver, capsule, width, time, time+1);
+
+
+	// preconditions are actually met
+	bef = get_number_of_clauses();
+	for (size_t action = 0; action < task.actions.size(); action++){
+		int actionVar = actionVars[time][action];
+        DEBUG(cout << "\t" << time << " " << action << " " << task.actions[action].get_name() << " = " << actionVar << endl);
+
+		const auto precs = task.actions[action].get_precondition();
+        for (size_t prec = 0; prec < precs.size(); prec++) {
+			const auto & precObjec = precs[prec];
+			int predicate = precObjec.predicate_symbol;
+			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
+			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
+
+			if (task.predicates[predicate].isStaticPredicate()){
+				// static preconditions must be handled more efficiently
+				// i.e. directly via support from init
+				// TODO
+			} else {
+				vector<int> precSlotVars;
+				for (int slot = 0; slot < width; slot++){
+					int precSlotVar = capsule.new_variable();
+					precSlotVars.push_back(precSlotVar);
+					DEBUG(capsule.registerVariable(precSlotVar,to_string(time) + " @ action " + task.actions[action].get_name() + " prec " + to_string(prec) + " slot " + to_string(slot)));
+
+					// if we select this slot, we actually have to have the correct fact there
+					andImplies(solver, actionVar, precSlotVar, predicateSlotVariables[time][slot][predicate]);
+
+					// iterate over the arguments of the precondition
+					for (size_t iArg = 0; iArg < precObjec.arguments.size(); iArg++){
+						int preconditionVar = precObjec.arguments[iArg].index;
+						const bool pIsConst = precObjec.arguments[iArg].constant;
+						int myParam = predicateArgumentPositions[predicate][iArg];
+
+						// argument in the precondition might be a constant 
+						if (pIsConst){
+							int myObjIndex = objToIndex[preconditionVar]; // is not actually a var, but the number of the constant ...
+							int constantVar = argumentSlotVariables[time][slot][myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+							andImplies(solver, actionVar, precSlotVar, constantVar); 
+						} else {
+							// variable equality
+							andImplies(solver, actionVar, precSlotVar, equalBefore[actionArgumentPositions[action][preconditionVar]][slot][myParam]); 
+						}
+					}
+				}
+
+
+				impliesOr(solver,actionVar,precSlotVars);
+			}
+		}
+	}
+	precSupport += get_number_of_clauses() - bef;
+
+
+
+	vector<vector<int>> slotsSupporter(width);
+
+	// adding effects
+	bef = get_number_of_clauses();
+	for (size_t action = 0; action < task.actions.size(); action++){
+		int actionVar = actionVars[time][action];
+        DEBUG(cout << "\t" << time << " " << action << " " << task.actions[action].get_name() << " = " << actionVar << endl);
+
+		const auto effs = task.actions[action].get_effects();
+        for (size_t eff = 0; eff < effs.size(); eff++) {
+			const auto & effObjec = effs[eff];
+			int predicate = effObjec.predicate_symbol;
+			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
+			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
+
+
+			if (effObjec.negated){
+				// must not be present in any of the slots
+				for (int slot = 0; slot < width; slot++){
+					set<int> equalFact;
+					equalFact.insert(actionVar);
+					equalFact.insert(predicateSlotVariables[time][slot][predicate]);
+
+					// iterate over the arguments of the precondition
+					for (size_t iArg = 0; iArg < effObjec.arguments.size(); iArg++){
+						int preconditionVar = effObjec.arguments[iArg].index;
+						const bool pIsConst = effObjec.arguments[iArg].constant;
+						int myParam = predicateArgumentPositions[predicate][iArg];
+
+						// argument in the precondition might be a constant 
+						if (pIsConst){
+							int myObjIndex = objToIndex[preconditionVar]; // is not actually a var, but the number of the constant ...
+							int constantVar = argumentSlotVariables[time][slot][myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+							equalFact.insert(constantVar); 
+						} else {
+							// variable equality
+							equalFact.insert(equalAfter[actionArgumentPositions[action][preconditionVar]][slot][myParam]); 
+						}
+					}
+					
+					notAll(solver,equalFact);
+					
+				}
+			} else {
+				vector<int> effSlotVars;
+				for (int slot = 0; slot < width; slot++){
+					int effSlotVar = capsule.new_variable();
+					effSlotVars.push_back(effSlotVar);
+					slotsSupporter[slot].push_back(effSlotVar);
+					DEBUG(capsule.registerVariable(effSlotVar,to_string(time) + " @ action " + task.actions[action].get_name() + " eff " + to_string(eff) + " slot " + to_string(slot)));
+
+					implies(solver, -actionVar, -effSlotVar);
+
+					// if we select this slot, we actually have to have the correct fact there
+					andImplies(solver, actionVar, effSlotVar, predicateSlotVariables[time][slot][predicate]);
+
+					// iterate over the arguments of the precondition
+					for (size_t iArg = 0; iArg < effObjec.arguments.size(); iArg++){
+						int preconditionVar = effObjec.arguments[iArg].index;
+						const bool pIsConst = effObjec.arguments[iArg].constant;
+						int myParam = predicateArgumentPositions[predicate][iArg];
+
+						// argument in the precondition might be a constant 
+						if (pIsConst){
+							int myObjIndex = objToIndex[preconditionVar]; // is not actually a var, but the number of the constant ...
+							int constantVar = argumentSlotVariables[time][slot][myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+							andImplies(solver, actionVar, effSlotVar, constantVar); 
+						} else {
+							// variable equality
+							andImplies(solver, actionVar, effSlotVar, equalAfter[actionArgumentPositions[action][preconditionVar]][slot][myParam]); 
+						}
+					}
+				}
+
+				// we don't need to force that we have that effect ...
+				impliesOr(solver,actionVar,effSlotVars);
+			}
+		}
+	}
+	precSupport += get_number_of_clauses() - bef;
+
+	// frame axioms	
+	for (int slot = 0; slot < width; slot++){
+		// idea: either the slot got overridden by an effect or is it the same as the slot before
+		int slotEqual = capsule.new_variable();
+		DEBUG(capsule.registerVariable(slotEqual,to_string(time) + " @ = " + to_string(time+1) + " @ slot " + to_string(slot)));
+		
+		// same predicate
+		for (size_t pred = 0; pred < task.predicates.size(); pred++){
+			int predBefore = predicateSlotVariables[time  ][slot][pred];
+			int predAfter  = predicateSlotVariables[time+1][slot][pred];
+			if (predBefore == -1) continue;
+
+			andImplies(solver,slotEqual, predBefore, predAfter);
+			andImplies(solver,slotEqual, predAfter, predBefore);
+			//andImplies(solver,predBefore, predAfter, slotEqual);
+		}
+		
+	   	
+		for (int factParameter = 0; factParameter < numberOfPredicateArgumentPositions; factParameter++){
+			int lower = lowerTindex[typeOfPredicateArgument[factParameter]];
+			int upper = upperTindex[typeOfPredicateArgument[factParameter]];
+	
+			for(int o = 0; o < numObjs; o++){
+				if (o < lower || o > upper)
+					continue;
+
+				// need to subtract the starting values of the types
+				int constBefore = argumentSlotVariables[time  ][slot][factParameter][o-lower];
+				int constAfter  = argumentSlotVariables[time+1][slot][factParameter][o-lower];
+				andImplies(solver,slotEqual, constBefore, constAfter);
+				andImplies(solver,slotEqual, constAfter, constBefore);
+				//andImplies(solver,constBefore, constAfter, slotEqual);
+			}
+		}
+
+		notImpliesOr(solver, slotEqual, slotsSupporter[slot]);
+	}
+
+
+
+
+		///// General supporter selection (no specific precondition is considered here)
+		//std::vector<std::vector<int>> precSupporterThisTime;
+		//// precondition support selection
+		//for (int p = 0; p < maxPrec; p++){
+		//	std::vector<int> precSupporterPrec;
+		//	for (int pTime = -1; pTime < time; pTime++){
+		//		int preSuppVar = capsule.new_variable();
+		//		precSupporterPrec.push_back(preSuppVar);
+		//		DEBUG(capsule.registerVariable(preSuppVar, "preSupp@" + to_string(time) + "#" + to_string(p) + "-" + to_string(pTime)));
+		//	}
+
+		//	precSupporterThisTime.push_back(precSupporterPrec);
+		//}
+		//precSupporter.push_back(precSupporterThisTime);
+
+		///// variables stating over which variables a support spans
+		//// precSupporterOver[p][ptime] is true if there is support for precondition p spanning *over* time ptime
+		//std::vector<std::vector<int>> precSupporterOverThisTime;
+		//for (int p = 0; p < maxPrec; p++){
+		//	std::vector<int> supportOver;
+		//	for (int pTime = 0; pTime < time; pTime++){
+		//		int overVar = capsule.new_variable();
+		//		implies(solver,precSupporter[time][p][pTime], overVar);
+		//		if (pTime > 0)
+		//			implies(solver,supportOver.back(),overVar);
+		//		
+		//		supportOver.push_back(overVar);
+		//		DEBUG(capsule.registerVariable(overVar, "supportOver@" + to_string(time) + "#" + to_string(p) + "-" + to_string(pTime)));
+		//	}
+
+		//	precSupporterOverThisTime.push_back(supportOver);
+		//}
+		//precSupporterOver.push_back(precSupporterOverThisTime);
+
+		//precSupport += get_number_of_clauses() - bef;
+		//bef = get_number_of_clauses();
+	
 
 		// TODO this is actually not necessary ... I will never access these variables anyway
-          //for (int l = params.size(); l < maxArity; l++) {
+          //for (int l = params.size(); l < maxActionArity; l++) {
 		//	impliesAllNot(solver,actionVar,parameterVars[time][l]);
 		//}
 	
-		actionTyping += get_number_of_clauses() - bef;
-		bef = get_number_of_clauses();
-
-
-		if (generateBaseFormula){
-      	    DEBUG(cout << "\t\tnullary" << endl);
-
-			// nullary preconditions
-			for (int p : *setPosNullaryPrec[action])
-				implies(solver,actionVar,lastNullary[p]);
-			for (int p : *setNegNullaryPrec[action])
-				impliesNot(solver,actionVar,lastNullary[p]);
-
-			for (int p : *setPosNullaryEff[action])
-				implies(solver,actionVar,currentNullary[p]);
-			for (int p : *setNegNullaryEff[action])
-				impliesNot(solver,actionVar,currentNullary[p]);
-		}
+	
 		
-		nullary += get_number_of_clauses() - bef;
-		bef = get_number_of_clauses();
-		// frame axioms for nullary predicates
-		bef = get_number_of_clauses();
-		if (generateBaseFormula){
-			for (int n : task.nullary_predicates){
-				vector<int> adder;
-				for (int a : nullaryAchiever[n])
-				   adder.push_back(actionVarsTime[a]);
-				impliesPosAndNegImpliesOr(solver,currentNullary[n], lastNullary[n], adder);
+		
+	//for (size_t action = 0; action < task.actions.size(); action++){
+	//	int actionVar = actionVars[time][action];
+	//	bef = get_number_of_clauses();
 
-				vector<int> deleter;
-				for (int d : nullaryDestroyer[n])
-				   deleter.push_back(actionVarsTime[d]);
-				impliesPosAndNegImpliesOr(solver,lastNullary[n], currentNullary[n], deleter);
-			}
-		}
-		nullary += get_number_of_clauses() - bef;
-		bef = get_number_of_clauses();
 
-	
-	
-	
-	
-	
-	
-	
-	}
+	//	if (generateBaseFormula){
+    //  	    DEBUG(cout << "\t\tnullary" << endl);
+
+	//		// nullary preconditions
+	//		for (int p : *setPosNullaryPrec[action])
+	//			implies(solver,actionVar,lastNullary[p]);
+	//		for (int p : *setNegNullaryPrec[action])
+	//			impliesNot(solver,actionVar,lastNullary[p]);
+
+	//		for (int p : *setPosNullaryEff[action])
+	//			implies(solver,actionVar,currentNullary[p]);
+	//		for (int p : *setNegNullaryEff[action])
+	//			impliesNot(solver,actionVar,currentNullary[p]);
+	//	}
+	//	
+	//	nullary += get_number_of_clauses() - bef;
+	//	bef = get_number_of_clauses();
+	//	// frame axioms for nullary predicates
+	//	bef = get_number_of_clauses();
+	//	if (generateBaseFormula){
+	//		for (int n : task.nullary_predicates){
+	//			vector<int> adder;
+	//			for (int a : nullaryAchiever[n])
+	//			   adder.push_back(actionVarsTime[a]);
+	//			impliesPosAndNegImpliesOr(solver,currentNullary[n], lastNullary[n], adder);
+
+	//			vector<int> deleter;
+	//			for (int d : nullaryDestroyer[n])
+	//			   deleter.push_back(actionVarsTime[d]);
+	//			impliesPosAndNegImpliesOr(solver,lastNullary[n], currentNullary[n], deleter);
+	//		}
+	//	}
+	//	nullary += get_number_of_clauses() - bef;
+	//	bef = get_number_of_clauses();
+	//}
 
 
 
@@ -1311,7 +1830,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	//		}
 
 	//		// TODO this is actually not necessary ... I will never access these variables anyway
-    //        //for (int l = params.size(); l < maxArity; l++) {
+    //        //for (int l = params.size(); l < maxActionArity; l++) {
 	//		//	impliesAllNot(solver,actionVar,parameterVars[time][l]);
 	//		//}
 	//	
@@ -1933,16 +2452,21 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 
 bool LiftedLinearSAT::callSolver(sat_capsule & capsule, void* solver, const Task &task, const std::clock_t & startTime, long long time_limit_in_ms){
+		
+	DEBUG(capsule.printVariables());
+
 	cout << "Generated Variables " << setw(10) << capsule.number_of_variables <<
 		" Clauses: " << setw(10) << get_number_of_clauses() << " length " << planLength << endl;
 	cout << "\tone action         " << setw(9) << oneAction << endl; 
 	cout << "\tmax 1 param value  " << setw(9) << atMostOneParamterValue << endl;
+	cout << "\tmax 1 predicate    " << setw(9) << atMostOnePredicate << endl;
 	cout << "\tinit maintain      " << setw(9) << variableInitMaintenance << endl;
 	cout << "\tprec support       " << setw(9) << precSupport << endl;
 	cout << "\tequals             " << setw(9) << equals << endl;
 	cout << "\tinit support       " << setw(9) << initSupp << endl;
 	cout << "\tstatic init support" << setw(9) << staticInitSupp << endl;
-	cout << "\ttyping             " << setw(9) << actionTyping << endl;
+	cout << "\ttyping actions     " << setw(9) << actionTyping << endl;
+	cout << "\ttyping predicates  " << setw(9) << predicateTyping << endl;
 	cout << "\tequals precs       " << setw(9) << equalsPrecs << endl; 
 	cout << "\tachiever           " << setw(9) << achieverImplications << endl; 
 	cout << "\tno deleter         " << setw(9) << noDeleter << endl; 
@@ -1950,8 +2474,6 @@ bool LiftedLinearSAT::callSolver(sat_capsule & capsule, void* solver, const Task
 	cout << "\tgoal deleters      " << setw(9) << goalDeleter << endl; 
 	cout << "\tnullary            " << setw(9) << nullary << endl;
 
-		
-	DEBUG(capsule.printVariables());
 
 	DEBUG(cout << "Starting solver" << endl);
 	bool* stopFlag = nullptr;
@@ -2035,7 +2557,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 	bool satisficing = !optimal;
 
 	//if (satisficing){
-	//	DEBUG(cout << "Parameter arity " << maxArity << " Objects " << task.objects.size() << endl);
+	//	DEBUG(cout << "Parameter arity " << maxActionArity << " Objects " << task.objects.size() << endl);
 	//
 	//
 	//	vector<int> planLenghtsToTry;
@@ -2187,6 +2709,9 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 	//		}
 	//	}
 	//} else {
+	
+
+		int width = 15;
 		if (limit == -1) maxLen = 9999999; else maxLen = limit;
 		void* solver;
 		sat_capsule capsule;
@@ -2195,7 +2720,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = 0; i < maxLen; i++){
+		for (int i = 10; i < maxLen; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
 				capsule.number_of_variables = 0;
@@ -2292,21 +2817,25 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			
 			
 			// if not in incremental mode, we need to generate the formula for all timesteps.
-			if (!incremental)
+			if (!incremental){
 				planLength = 0;
+				generate_predicate_slot_layer(task, solver, capsule, width, 0); // generate slots directly after init
+			}
 			
 			bool linearIncrease = true;
 			if (!linearIncrease){
 				while (planLength <= (1 << i)-1){
 					planLength++;
-					generate_formula(task,solver,capsule);
+					generate_formula(task,solver,capsule,width);
 				}
 			} else {
 				while (planLength <= i){
 					planLength++;
-					generate_formula(task,solver,capsule);
+					generate_formula(task,solver,capsule,width);
 				}
 			}
+
+			generate_goal_assertion(task, solver, capsule, width, planLength);
 
 
 			if (callSolver(capsule,solver,task,start)){
@@ -2325,6 +2854,8 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 					return utils::ExitCode::SEARCH_OUT_OF_TIME;
 				}
 			}
+
+			exit(0);
 		}
 	//}
 	return utils::ExitCode::SEARCH_UNSOLVED_INCOMPLETE;
@@ -2348,9 +2879,9 @@ int LiftedLinearSAT::sortObjs(int index, int type) {
 }
 
 int LiftedLinearSAT::actionID(int i) {
-    return (maxArity + 1) * i;
+    return (maxActionArity + 1) * i;
 }
 
 int LiftedLinearSAT::paramID(int i, int j) {
-    return (maxArity + 1) * i + (j + 1);
+    return (maxActionArity + 1) * i + (j + 1);
 }

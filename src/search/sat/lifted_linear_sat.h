@@ -43,7 +43,8 @@ private:
 	std::map<std::pair<int, int>, bool> needToType;
     const int largeC = 100000;
     int planLength = 8;
-    int maxArity = -1;
+    int maxActionArity = -1;
+    int maxPredicateArity = -1;
     int maxPrec = -1;
 
 	int maxLen;
@@ -81,7 +82,10 @@ public:
 
     LiftedLinearSAT(const Task& task);
 	utils::ExitCode solve(const Task& task, int limit, bool optimal, bool incremental);
-	void generate_formula(const Task &task, void* solver, sat_capsule & capsule);
+	void generate_predicate_slot_layer(const Task &task, void* solver, sat_capsule & capsule, int width, int time);
+	std::vector<std::vector<std::vector<int>>> generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int actionTime, int stateTime);
+	void generate_goal_assertion(const Task &task, void* solver, sat_capsule & capsule, int width, int time);
+	void generate_formula(const Task &task, void* solver, sat_capsule & capsule, int width);
 	bool callSolver(sat_capsule & capsule, void* solver, const Task &task, const std::clock_t & startTime,long long time_limit_in_ms = -1);
 	bool atom_not_satisfied(const DBState &s, const AtomicGoal &atomicGoal) const;
 
