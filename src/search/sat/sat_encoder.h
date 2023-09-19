@@ -53,6 +53,7 @@ void andImpliesOr(void* solver, const std::vector<int> & i, const std::set<int> 
 void impliesPosAndNegImpliesOr(void* solver, int i, int j, std::vector<int> & k);
 void impliesAllNot(void* solver, int i, std::vector<int> & j);
 void notImpliesAllNot(void* solver, int i, std::vector<int> & j);
+void notImpliesOr(void* solver, int i, std::vector<int> & j);
 void andImplies(void* solver, int i, int j, int k);
 void andImplies(void* solver, int i, int j, int k, int l);
 void andImplies(void* solver, std::set<int> i, int j);

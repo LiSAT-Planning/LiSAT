@@ -117,6 +117,14 @@ void impliesOr(void* solver, int i, std::vector<int> & j){
 	number_of_clauses++;
 }
 
+void notImpliesOr(void* solver, int i, std::vector<int> & j){
+	ipasir_add(solver,i);
+	for (int & x : j)
+		ipasir_add(solver,x);
+	ipasir_add(solver,0);
+	number_of_clauses++;
+}
+
 void impliesOr(void* solver, int i, int k, std::vector<int> & j){
 	ipasir_add(solver,-i);
 	ipasir_add(solver,-k);
