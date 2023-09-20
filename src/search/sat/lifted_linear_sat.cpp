@@ -158,40 +158,40 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
         }
     }
 
-    //// create data structure for nullary precs/effects -> from bitmap to iterable set
-    //for (tSize a = 0; a < task.actions.size(); a++) {
-    //    setPosNullaryPrec.push_back(new unordered_set<int>);
-    //    setNegNullaryPrec.push_back(new unordered_set<int>);
-    //    setPosNullaryEff.push_back(new unordered_set<int>);
-    //    setNegNullaryEff.push_back(new unordered_set<int>);
+    // create data structure for nullary precs/effects -> from bitmap to iterable set
+    for (tSize a = 0; a < task.actions.size(); a++) {
+        setPosNullaryPrec.push_back(new unordered_set<int>);
+        setNegNullaryPrec.push_back(new unordered_set<int>);
+        setPosNullaryEff.push_back(new unordered_set<int>);
+        setNegNullaryEff.push_back(new unordered_set<int>);
 
-    //    auto posPrec = task.actions[a].get_positive_nullary_precond();
-    //    for (tSize f = 0; f < posPrec.size(); f++) {
-    //        if (posPrec[f]) {
-    //            setPosNullaryPrec[a]->insert(f);
-    //        }
-    //    }
-    //    auto negPrec = task.actions[a].get_negative_nullary_precond();
-    //    for (tSize f = 0; f < negPrec.size(); f++) {
-    //        if (negPrec[f]) {
-    //            setNegNullaryPrec[a]->insert(f);
-    //        }
-    //    }
-    //    auto posEff = task.actions[a].get_positive_nullary_effects();
-    //    for (tSize f = 0; f < posEff.size(); f++) {
-    //        if (posEff[f]) {
-    //            setPosNullaryEff[a]->insert(f);
-	//			nullaryAchiever[f].push_back(a);
-    //        }
-    //    }
-    //    auto negEff = task.actions[a].get_negative_nullary_effects();
-    //    for (tSize f = 0; f < negEff.size(); f++) {
-    //        if (negEff[f]) {
-    //            setNegNullaryEff[a]->insert(f);
-	//			nullaryDestroyer[f].push_back(a);
-    //        }
-    //    }
-    //}
+        auto posPrec = task.actions[a].get_positive_nullary_precond();
+        for (tSize f = 0; f < posPrec.size(); f++) {
+            if (posPrec[f]) {
+                setPosNullaryPrec[a]->insert(f);
+            }
+        }
+        auto negPrec = task.actions[a].get_negative_nullary_precond();
+        for (tSize f = 0; f < negPrec.size(); f++) {
+            if (negPrec[f]) {
+                setNegNullaryPrec[a]->insert(f);
+            }
+        }
+        auto posEff = task.actions[a].get_positive_nullary_effects();
+        for (tSize f = 0; f < posEff.size(); f++) {
+            if (posEff[f]) {
+                setPosNullaryEff[a]->insert(f);
+				nullaryAchiever[f].push_back(a);
+            }
+        }
+        auto negEff = task.actions[a].get_negative_nullary_effects();
+        for (tSize f = 0; f < negEff.size(); f++) {
+            if (negEff[f]) {
+                setNegNullaryEff[a]->insert(f);
+				nullaryDestroyer[f].push_back(a);
+            }
+        }
+    }
 
     // make directional if there are multiple identical types
 	for (int i = 0; i < numTypes; i++) {
@@ -699,7 +699,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 
 				// consider how many arguments are there
 				int predicateVar = thisSlotPredicates[predicate];
-				cout << "PREDICATE VAR " << predicateVar << endl;
+				DEBUG(cout << "PREDICATE VAR " << predicateVar << endl);
 				if (task.predicates[predicate].getArity() == 1){
 					vector<int> possibleValues;
 					
@@ -707,12 +707,13 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 						vector<int> tuple = supportingPredicateTuples[predicate][i].first;
 					
 						int myObjIndex = objToIndex[tuple[0]];
-						int myParam = predicateArgumentPositions[predicate][i];
+						int myParam = predicateArgumentPositions[predicate][0];
 						int constantVar = thisSlotParameterVars[myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
 						
 						possibleValues.push_back(constantVar);
+						//cout << "QQ " << constantVar << " " << myParam << " " << myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]] << " " << myObjIndex << " " << typeOfPredicateArgument[myParam]  << " " << lowerTindex[typeOfPredicateArgument[myParam]] << endl;
 					}
-				
+					//cout << "A " << predicateVar << endl;
 					impliesOr(solver,predicateVar,possibleValues);
 				} else {
 					for (size_t lastPos = 0; lastPos < task.predicates[predicate].getArity() - 1 ; lastPos++){
@@ -744,6 +745,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 				
 				
 						for (auto & x : possibleUpto){
+							//cout << "B" << endl;
 							andImpliesOr(solver,x.first,x.second);
 							DEBUG(for (int i : x.first) cout << " - [" << capsule.variableNames[i] << "]";
 							for (int i : x.second) cout << " [" << capsule.variableNames[i] << "]";
@@ -756,6 +758,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 							for (auto & x : possibleUpto)
 								initial.push_back(x.first[posOfValue]);
 							
+							//cout << "C" << endl;
 							impliesOr(solver,predicateVar,initial);
 							DEBUG(cout << "- [" << capsule.variableNames[predicateVar] << "]";
 							for (int i : initial) cout << " [" << capsule.variableNames[i] << "]";
@@ -774,6 +777,12 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 
 
 void LiftedLinearSAT::generate_goal_assertion(const Task &task, void* solver, sat_capsule & capsule, int width, int time){
+	for (int g : task.goal.positive_nullary_goals)
+		assertYes(solver,lastNullary[g]);	
+	for (int g : task.goal.negative_nullary_goals)
+		assertNot(solver,lastNullary[g]);	
+
+
 	const auto goals = task.goal.goal;
 	for (size_t goal = 0; goal < goals.size(); goal++) {
 		const auto & goalObjec = goals[goal];
@@ -1144,7 +1153,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 					// if we select this slot, we actually have to have the correct fact there
 					andImplies(solver, actionVar, effSlotVar, predicateSlotVariables[time+1][slot][predicate]);
-					cout << "YY " << actionVar << " " << effSlotVar << " " << predicateSlotVariables[time+1][slot][predicate] << endl; 
+					DEBUG(cout << "YY " << actionVar << " " << effSlotVar << " " << predicateSlotVariables[time+1][slot][predicate] << endl); 
 
 					// iterate over the arguments of the precondition
 					for (size_t iArg = 0; iArg < effObjec.arguments.size(); iArg++){
@@ -1171,6 +1180,44 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 		}
 	}
 	precSupport += get_number_of_clauses() - bef;
+
+
+	bef = get_number_of_clauses();
+	for (size_t action = 0; action < task.actions.size(); action++){
+		int actionVar = actionVars[time][action];
+		if (generateBaseFormula){
+    	    DEBUG(cout << "\t\tnullary" << endl);
+
+			// nullary preconditions
+			for (int p : *setPosNullaryPrec[action])
+				implies(solver,actionVar,lastNullary[p]);
+			for (int p : *setNegNullaryPrec[action])
+				impliesNot(solver,actionVar,lastNullary[p]);
+
+			for (int p : *setPosNullaryEff[action])
+				implies(solver,actionVar,currentNullary[p]);
+			for (int p : *setNegNullaryEff[action])
+				impliesNot(solver,actionVar,currentNullary[p]);
+		}
+	}	
+	// frame axioms for nullary predicates
+	if (generateBaseFormula){
+		for (int n : task.nullary_predicates){
+			vector<int> adder;
+			for (int a : nullaryAchiever[n])
+			   adder.push_back(actionVarsTime[a]);
+			impliesPosAndNegImpliesOr(solver,currentNullary[n], lastNullary[n], adder);
+
+			vector<int> deleter;
+			for (int d : nullaryDestroyer[n])
+			   deleter.push_back(actionVarsTime[d]);
+			impliesPosAndNegImpliesOr(solver,lastNullary[n], currentNullary[n], deleter);
+		}
+	}
+	nullary += get_number_of_clauses() - bef;
+	bef = get_number_of_clauses();
+	
+	lastNullary = currentNullary;
 
 	// frame axioms	
 	for (int slot = 0; slot < width; slot++){
@@ -1279,25 +1326,25 @@ bool LiftedLinearSAT::callSolver(sat_capsule & capsule, void* solver, const Task
 	// extract the plan
 	vector<LiftedOperatorId> plan;
 	for (int time = 0; time < planLength; time++){
-		cout << "timestep " << time << endl;
+		DEBUB(cout << "timestep " << time << endl);
 		for (size_t action = 0; action < task.actions.size(); action++){
 			int var = actionVars[time][action];
 			if (ipasir_val(solver,var) > 0){
 
-				cout << "  " << task.actions[action].get_name();
+				DEBUG(cout << "  " << task.actions[action].get_name());
             	auto params = task.actions[action].get_parameters();
 				vector<int> arguments;
             	for (size_t l = 0; l < params.size(); l++) {
 					int p = actionArgumentPositions[action][l];
-					cout << " " << l << ":";
+					DEBUG(cout << " " << l << ":");
 					for (int o = 0; o <= upperTindex[typeOfArgument[p]] - lowerTindex[typeOfArgument[p]]; o++){
 						if (ipasir_val(solver,parameterVars[time][p][o]) > 0){
-							cout << " " << task.objects[indexToObj[o + lowerTindex[typeOfArgument[p]]]].getName();
+							DEBUG(cout << " " << task.objects[indexToObj[o + lowerTindex[typeOfArgument[p]]]].getName());
 							arguments.push_back(indexToObj[o + lowerTindex[typeOfArgument[p]]]);
 						}
 					}
 				}
-				cout << endl;
+				DEBUG(cout << endl);
 				
 				LiftedOperatorId op (action, move(arguments));
 				plan.push_back(op);
@@ -1474,7 +1521,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 	//} else {
 	
 
-		int width = 10;
+		int width = 30;
 		if (limit == -1) maxLen = 9999999; else maxLen = limit;
 		void* solver;
 		sat_capsule capsule;
@@ -1483,7 +1530,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = 10; i < maxLen; i++){
+		for (int i = 20; i < maxLen; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
 				capsule.number_of_variables = 0;
@@ -1524,56 +1571,21 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			
 			
 			// initialise 0-ary predicates either every time we run or once for incremental solving
-			// TODO
-			//if (!incremental || i == 0){
+			if (!incremental || i == 0){
+				int clausesBefore = get_number_of_clauses();
+				for (int n : task.nullary_predicates){
+					int nullaryInInit = capsule.new_variable();
+					lastNullary[n] = nullaryInInit;
+					DEBUG(capsule.registerVariable(nullaryInInit,
+								"nullary#" + to_string(n) + "_" + to_string(-1)));
 
-			//	// the goal must be achieved!
-			//	int gc = 0;
-			//	int clausesBefore = get_number_of_clauses();
-			//	for (size_t goal = 0; goal < task.goal.goal.size(); goal++){
-			//		const AtomicGoal & goalAtom = task.goal.goal[goal];
-			//		std::vector<int> goalSupporter;
-			//		
-			//		if (goalAtom.negated) {
-			//			goalSupporterVars.push_back(goalSupporter);
-			//			continue; // TODO don't know what to do ...
-			//		}
-			//		gc++;
-
-			//		//ActionPrecAchiever* thisGoalAchievers = goalAchievers->precAchievers[goal];
-			//	
-			//		for (int pTime = 0; pTime < maxPlanLength+1; pTime++){
-			//			int goalSuppVar = capsule.new_variable();
-			//			goalSupporter.push_back(goalSuppVar);
-			//			DEBUG(capsule.registerVariable(goalSuppVar,
-			//						"goalSupp#" + to_string(goal) + "-" + to_string(pTime-1)));
-
-			//		}
-			//		if (atom_not_satisfied(task.initial_state,goalAtom)) assertNot(solver,goalSupporter[0]);	
-			//		
-			//		atLeastOne(solver,capsule,goalSupporter);
-			//		goalSupporterVars.push_back(goalSupporter);
-			//	}
-			//	goalAchiever += get_number_of_clauses() - clausesBefore;
-			//	clausesBefore = get_number_of_clauses();
-
-			//	// we only test executable plans and if the goal is a dead end ...
-			//	if (!gc) return utils::ExitCode::SEARCH_UNSOLVABLE;
-
-			//
-			//	for (int n : task.nullary_predicates){
-			//		int nullaryInInit = capsule.new_variable();
-			//		lastNullary[n] = nullaryInInit;
-			//		DEBUG(capsule.registerVariable(nullaryInInit,
-			//					"nullary#" + to_string(n) + "_" + to_string(-1)));
-
-			//		if (task.initial_state.get_nullary_atoms()[n])
-			//			assertYes(solver,nullaryInInit);
-			//		else
-			//			assertNot(solver,nullaryInInit);
-			//	}
-			//	nullary += get_number_of_clauses() - clausesBefore;
-			//}
+					if (task.initial_state.get_nullary_atoms()[n])
+						assertYes(solver,nullaryInInit);
+					else
+						assertNot(solver,nullaryInInit);
+				}
+				nullary += get_number_of_clauses() - clausesBefore;
+			}
 
 
 			// start the incremental search for a plan	
