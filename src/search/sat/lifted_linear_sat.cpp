@@ -32,6 +32,10 @@ map<int,int> typeOfPredicateArgument;
 vector<vector<pair<vector<int>,int>>> supportingPredicateTuples; // predicate
 
 
+set<pair<int,int>> possibleBeforeEquals;
+set<pair<int,int>> possibleAfterEquals;
+
+
 LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 
 	int maximumNetChange = 0;
@@ -516,6 +520,62 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 	//		}
 	//	}
 	//}
+
+
+	// preconditions are actually met
+	for (size_t action = 0; action < task.actions.size(); action++){
+		const auto precs = task.actions[action].get_precondition();
+        for (size_t prec = 0; prec < precs.size(); prec++) {
+			const auto & precObjec = precs[prec];
+			int predicate = precObjec.predicate_symbol;
+			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
+			if (task.predicates[predicate].getArity() == 0) continue; 
+			
+			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue;
+		
+			if (!task.predicates[predicate].isStaticPredicate()){
+				// iterate over the arguments of the precondition
+				for (size_t iArg = 0; iArg < precObjec.arguments.size(); iArg++){
+					int preconditionVar = precObjec.arguments[iArg].index;
+					const bool pIsConst = precObjec.arguments[iArg].constant;
+					int myParam = predicateArgumentPositions[predicate][iArg];
+
+					// argument in the precondition might be a constant 
+					if (!pIsConst){
+						// variable equality
+						int predSlot = actionArgumentPositions[action][preconditionVar];
+						possibleBeforeEquals.insert({predSlot, myParam});
+						//cout << predSlot << " " << myParam << endl;
+					}
+				}
+			}
+		}
+	}
+
+
+	// adding effects
+	for (size_t action = 0; action < task.actions.size(); action++){
+		const auto effs = task.actions[action].get_effects();
+        for (size_t eff = 0; eff < effs.size(); eff++) {
+			const auto & effObjec = effs[eff];
+			int predicate = effObjec.predicate_symbol;
+			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
+			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
+			if (task.predicates[predicate].getArity() == 0) continue; 
+			// iterate over the arguments of the precondition
+			for (size_t iArg = 0; iArg < effObjec.arguments.size(); iArg++){
+				int preconditionVar = effObjec.arguments[iArg].index;
+				const bool pIsConst = effObjec.arguments[iArg].constant;
+				int myParam = predicateArgumentPositions[predicate][iArg];
+
+				// argument in the precondition might be a constant 
+				if (!pIsConst){
+					int afterSlot = actionArgumentPositions[action][preconditionVar];
+					possibleAfterEquals.insert({afterSlot,myParam}); 
+				}
+			}
+		}
+	}
 }
 
 void printVariableTruth(void* solver, sat_capsule & capsule);
@@ -603,6 +663,12 @@ vector<vector<vector<int>>> LiftedLinearSAT::generate_action_state_equality(cons
 		for (int slot = 0; slot < width; slot++){
 			vector<int> eqVarsSlot;
 	   		for (int factParameter = 0; factParameter < numberOfPredicateArgumentPositions; factParameter++){
+				if ((actionTime == stateTime && possibleBeforeEquals.count({actionParamter,factParameter}) == 0) ||
+					(actionTime + 1 == stateTime && possibleAfterEquals.count({actionParamter,factParameter}) == 0)){
+					eqVarsSlot.push_back(-1);
+					continue;
+				}
+
 				int equalsVar = capsule.new_variable();
 				eqVarsSlot.push_back(equalsVar);
 				DEBUG(capsule.registerVariable(equalsVar, to_string(actionTime) + " @ # " +to_string(actionParamter)+" = "	+ to_string(stateTime) + " @ # " + to_string(factParameter)));
@@ -1393,21 +1459,21 @@ parameterEqualsConstraints;
 	cout << "Number of clauses submitted to solver: " << clauseCount << " individually counded: " << individuallyCounted <<
 			" equalCounted: " << (clauseCount == individuallyCounted) << endl; 
 
-	cout << "\tmax 1 action                 " << setw(9) << oneAction << endl; 
-	cout << "\tmax 1 action param value     " << setw(9) << atMostOneParamterValue << endl;
-	cout << "\tmax 1 predicate              " << setw(9) << atMostOnePredicate << endl;
-	cout << "\tmax 1 predicate param value  " << setw(9) << atMostOnePredicateValueArgument << endl;
-	cout << "\ttyping actions               " << setw(9) << actionTyping << endl;
-	cout << "\ttyping predicates            " << setw(9) << predicateTyping << endl;
-	cout << "\tparameter (not) equals       " << setw(9) << parameterEqualsConstraints << endl;
-	cout << "\tprec met                     " << setw(9) << precSupport << endl;
-	cout << "\tadd effects                  " << setw(9) << addEffects << endl; 
-	cout << "\tdel effects                  " << setw(9) << delEffects << endl; 
-	cout << "\tframe equals                 " << setw(9) << frameEqual << endl;
-	cout << "\tframe implies                " << setw(9) << frameImplies << endl;
-	cout << "\tequals (with state)          " << setw(9) << equals << endl;
-	cout << "\tinit support                 " << setw(9) << initSupp << endl;
-	cout << "\tgoal achievers               " << setw(9) << goalAchiever << endl; 
+	cout << "\tFS max 1 action                 " << setw(9) << oneAction                       << " " << setprecision(6) << double(oneAction                      ) / clauseCount << endl; 
+	cout << "\tFS max 1 action param value     " << setw(9) << atMostOneParamterValue          << " " << setprecision(6) << double(atMostOneParamterValue         ) / clauseCount << endl;
+	cout << "\tFS max 1 predicate              " << setw(9) << atMostOnePredicate              << " " << setprecision(6) << double(atMostOnePredicate             ) / clauseCount << endl;
+	cout << "\tFS max 1 predicate param value  " << setw(9) << atMostOnePredicateValueArgument << " " << setprecision(6) << double(atMostOnePredicateValueArgument) / clauseCount << endl;
+	cout << "\tFS typing actions               " << setw(9) << actionTyping                    << " " << setprecision(6) << double(actionTyping                   ) / clauseCount << endl;
+	cout << "\tFS typing predicates            " << setw(9) << predicateTyping                 << " " << setprecision(6) << double(predicateTyping                ) / clauseCount << endl;
+	cout << "\tFS parameter (not) equals       " << setw(9) << parameterEqualsConstraints      << " " << setprecision(6) << double(parameterEqualsConstraints     ) / clauseCount << endl;
+	cout << "\tFS prec met                     " << setw(9) << precSupport                     << " " << setprecision(6) << double(precSupport                    ) / clauseCount << endl;
+	cout << "\tFS add effects                  " << setw(9) << addEffects                      << " " << setprecision(6) << double(addEffects                     ) / clauseCount << endl; 
+	cout << "\tFS del effects                  " << setw(9) << delEffects                      << " " << setprecision(6) << double(delEffects                     ) / clauseCount << endl; 
+	cout << "\tFS frame equals                 " << setw(9) << frameEqual                      << " " << setprecision(6) << double(frameEqual                     ) / clauseCount << endl;
+	cout << "\tFS frame implies                " << setw(9) << frameImplies                    << " " << setprecision(6) << double(frameImplies                   ) / clauseCount << endl;
+	cout << "\tFS equals (with state)          " << setw(9) << equals                          << " " << setprecision(6) << double(equals                         ) / clauseCount << endl;
+	cout << "\tFS init support                 " << setw(9) << initSupp                        << " " << setprecision(6) << double(initSupp                       ) / clauseCount << endl;
+	cout << "\tFS goal achievers               " << setw(9) << goalAchiever                    << " " << setprecision(6) << double(goalAchiever                   ) / clauseCount << endl; 
 
 	DEBUG(cout << "Starting solver" << endl);
 	bool* stopFlag = nullptr;
@@ -1674,7 +1740,8 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 				frameEqual = 0;
 				frameImplies = 0;
 				atMostOnePredicateValueArgument = 0;
-				parameterEqualsConstraints = 0;
+				atMostOnePredicate = 0;
+			   	parameterEqualsConstraints = 0;
 			}
 
 			std::clock_t start = std::clock();
