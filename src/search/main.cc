@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
 #ifndef CMAKE_NO_SAT
         std::unique_ptr<LiftedLinearSAT> liftedSAT(new LiftedLinearSAT(task));
     	try {
-    	    auto exitcode = liftedSAT->solve(task,opt.get_planLength(), opt.get_optimal(), opt.get_incremental());
+    	    auto exitcode = liftedSAT->solve(task,opt.get_planLength(), opt.get_optimal(), opt.get_incremental(), opt.get_width());
     	    utils::report_exit_code_reentrant(exitcode);
     	    return static_cast<int>(exitcode);
     	}

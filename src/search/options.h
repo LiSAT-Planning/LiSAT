@@ -16,6 +16,7 @@ class Options {
     std::string datalog_file;
     unsigned seed;
 	int planLength;
+	int width;
 	bool optimal;
 	bool incremental;
 
@@ -32,6 +33,7 @@ public:
             ("state-representation,r", po::value<std::string>()->default_value("sparse"), "State representation.")
             ("datalog-file", po::value<std::string>()->default_value("FilePathUndefined"), "Datalog model file.")
             ("planLength,l", po::value<int>()->default_value(-1), "Plan length for the SAT encoding. If it is -1, then the satisficing solver will run in portfolio mode.")
+            ("width,w", po::value<int>()->default_value(10), "Number of predicate slots in linear encoding")
             ("optimal,o", "Run the SAT planner in optimal mode")
             ("incremental,i", "Run the SAT planner in incremenal mode. ATTENTION: this is not supported by all SAT solvers")
             ;
@@ -60,6 +62,7 @@ public:
         datalog_file = vm["datalog-file"].as<std::string>();
         seed = vm["seed"].as<unsigned>();
         planLength = vm["planLength"].as<int>();
+        width = vm["width"].as<int>();
         optimal = vm.count("optimal");
         incremental = vm.count("incremental");
     }
@@ -94,6 +97,10 @@ public:
 
     int get_planLength() const {
         return planLength;
+    }
+
+	int get_width() const {
+        return width;
     }
 
     unsigned int get_optimal() const {
