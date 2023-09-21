@@ -577,6 +577,7 @@ int addEffects = 0;
 int delEffects = 0;
 int frameEqual = 0;
 int frameImplies = 0;
+int parameterEqualsConstraints = 0;
 
 extern int actionTyping;
 extern int atMostOneParamterValue;
@@ -1020,7 +1021,6 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	vector<vector<vector<int>>> equalAfter = generate_action_state_equality(task, solver, capsule, width, time, time+1);
 
 
-	bef = get_number_of_clauses();
 	// preconditions are actually met
 	for (size_t action = 0; action < task.actions.size(); action++){
 		int actionVar = actionVars[time][action];
@@ -1031,8 +1031,48 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			const auto & precObjec = precs[prec];
 			int predicate = precObjec.predicate_symbol;
 			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
-			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
 			if (task.predicates[predicate].getArity() == 0) continue; 
+			
+			if (task.predicates[predicate].getName().rfind("=", 0) == 0){
+				bef = get_number_of_clauses();
+				if (!precObjec.negated){
+					cout << "ERROR: linear encoding does not support equals constraints in preconditions yet." << endl;
+					exit(-1);
+				}
+				if (precObjec.arguments[0].constant || precObjec.arguments[1].constant){
+					cout << "ERROR: linear encoding does not support constants in equals yes." << endl;
+					exit(-1);
+				}
+				int var1 = actionArgumentPositions[action][precObjec.arguments[0].index];
+				int var2 = actionArgumentPositions[action][precObjec.arguments[1].index];
+				
+				int lower1 = lowerTindex[typeOfArgument[var1]];
+				int lower2 = lowerTindex[typeOfArgument[var2]];
+				int upper1 = upperTindex[typeOfArgument[var1]];
+				int upper2 = upperTindex[typeOfArgument[var2]];
+				// only constants in the intersection are actually relevant
+				int lower = max(lower1,lower2);
+				int upper = min(upper1,upper2);
+
+
+				// generated an not equals constraint between them
+				for(int o = 0; o < numObjs; o++){
+					if (o < lower || o > upper)
+						continue;
+					
+					int constantVar1 = parameterVarsTime[var1][o - lower1];
+					int constantVar2 = parameterVarsTime[var2][o - lower2];
+
+					andImpliesNot(solver, actionVar, constantVar1, constantVar2);
+
+				}
+				parameterEqualsConstraints += get_number_of_clauses() - bef;
+				bef = get_number_of_clauses();
+				continue;
+			}
+
+
+			bef = get_number_of_clauses();
 
 			if (task.predicates[predicate].isStaticPredicate()){
 				// static preconditions must be handled more efficiently
@@ -1151,10 +1191,10 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 				impliesOr(solver,actionVar,precSlotVars);
 			}
+			precSupport += get_number_of_clauses() - bef;
+			bef = get_number_of_clauses();
 		}
 	}
-	precSupport += get_number_of_clauses() - bef;
-	bef = get_number_of_clauses();
 
 
 	vector<vector<int>> slotsSupporter(width);
@@ -1345,7 +1385,8 @@ oneAction +
 addEffects + 
 delEffects +
 frameEqual + 
-frameImplies;
+frameImplies +
+parameterEqualsConstraints;
 
 	cout << "Generated Variables " << setw(10) << capsule.number_of_variables <<
 		" Clauses: " << setw(10) << get_number_of_clauses() << " length " << planLength << endl;
@@ -1358,6 +1399,7 @@ frameImplies;
 	cout << "\tmax 1 predicate param value  " << setw(9) << atMostOnePredicateValueArgument << endl;
 	cout << "\ttyping actions               " << setw(9) << actionTyping << endl;
 	cout << "\ttyping predicates            " << setw(9) << predicateTyping << endl;
+	cout << "\tparameter (not) equals       " << setw(9) << parameterEqualsConstraints << endl;
 	cout << "\tprec met                     " << setw(9) << precSupport << endl;
 	cout << "\tadd effects                  " << setw(9) << addEffects << endl; 
 	cout << "\tdel effects                  " << setw(9) << delEffects << endl; 
@@ -1632,6 +1674,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 				frameEqual = 0;
 				frameImplies = 0;
 				atMostOnePredicateValueArgument = 0;
+				parameterEqualsConstraints = 0;
 			}
 
 			std::clock_t start = std::clock();
