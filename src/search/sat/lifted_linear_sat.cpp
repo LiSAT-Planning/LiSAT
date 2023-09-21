@@ -36,8 +36,6 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 
 	int maximumNetChange = 0;
 	for (size_t action = 0; action < task.actions.size(); action++){
-        DEBUG(cout << "\t" << time << " " << action << " " << task.actions[action].get_name() << " = " << actionVar << endl);
-
 		const auto effs = task.actions[action].get_effects();
 		const auto precs = task.actions[action].get_precondition();
 		int netChange = 0;
@@ -656,7 +654,8 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 		for (int predicate = 0; predicate < int(task.predicates.size()); predicate++){
 			if (task.predicates[predicate].getName().rfind("type@", 0) == 0 || 
 				task.predicates[predicate].getName().rfind("=", 0) == 0||
-				task.predicates[predicate].isStaticPredicate()) {
+				task.predicates[predicate].isStaticPredicate() || 
+				task.predicates[predicate].getArity() == 0) {
 				thisSlotPredicates.push_back(-1);
 				continue; 
 			}
@@ -699,6 +698,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 
 		// predicate types must be correct
 		for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
+			if (task.predicates[predicate].getArity() == 0) continue;
 			if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
 			int predicateVar = thisSlotPredicates[predicate];
     	    DEBUG(cout << "\t" << time << " " << slot << " " << predicate << " " << task.predicates[predicate].getName() << " = " << predicateVar << endl);
@@ -742,6 +742,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 		// maybe select from init
 		if (time == 0){
 			for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
+				if (task.predicates[predicate].getArity() == 0) continue;
 				if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
 
 				// consider how many arguments are there
@@ -790,14 +791,16 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 							possibleUpto[subTuple].insert(constantVar);
 						}
 				
+						//cout << "B" << endl;
 				
 						for (auto & x : possibleUpto){
-							//cout << "B" << endl;
 							andImpliesOr(solver,x.first,x.second);
 							DEBUG(for (int i : x.first) cout << " - [" << capsule.variableNames[i] << "]";
 							for (int i : x.second) cout << " [" << capsule.variableNames[i] << "]";
 							cout << endl);
 						}
+
+						//cout << "C" << endl;
 				
 						if (lastPos == 0){
 							int posOfValue = 1;
@@ -811,6 +814,8 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 							for (int i : initial) cout << " [" << capsule.variableNames[i] << "]";
 							cout << endl);
 						}
+						
+						//cout << "D " << task.predicates[predicate].getArity() << endl;
 					}
 				}
 			}
@@ -1027,6 +1032,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			int predicate = precObjec.predicate_symbol;
 			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
 			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
+			if (task.predicates[predicate].getArity() == 0) continue; 
 
 			if (task.predicates[predicate].isStaticPredicate()){
 				// static preconditions must be handled more efficiently
@@ -1164,6 +1170,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			int predicate = effObjec.predicate_symbol;
 			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
 			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
+			if (task.predicates[predicate].getArity() == 0) continue; 
 
 
 			if (effObjec.negated){
@@ -1663,8 +1670,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 
 
 			// start the incremental search for a plan	
-			
-			
+	
 			// if not in incremental mode, we need to generate the formula for all timesteps.
 			if (!incremental){
 				planLength = 0;
