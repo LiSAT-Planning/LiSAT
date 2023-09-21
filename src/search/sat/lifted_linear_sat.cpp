@@ -1459,21 +1459,21 @@ parameterEqualsConstraints;
 	cout << "Number of clauses submitted to solver: " << clauseCount << " individually counded: " << individuallyCounted <<
 			" equalCounted: " << (clauseCount == individuallyCounted) << endl; 
 
-	cout << "\tFS max 1 action                 " << setw(9) << oneAction                       << " " << setprecision(6) << double(oneAction                      ) / clauseCount << endl; 
-	cout << "\tFS max 1 action param value     " << setw(9) << atMostOneParamterValue          << " " << setprecision(6) << double(atMostOneParamterValue         ) / clauseCount << endl;
-	cout << "\tFS max 1 predicate              " << setw(9) << atMostOnePredicate              << " " << setprecision(6) << double(atMostOnePredicate             ) / clauseCount << endl;
-	cout << "\tFS max 1 predicate param value  " << setw(9) << atMostOnePredicateValueArgument << " " << setprecision(6) << double(atMostOnePredicateValueArgument) / clauseCount << endl;
-	cout << "\tFS typing actions               " << setw(9) << actionTyping                    << " " << setprecision(6) << double(actionTyping                   ) / clauseCount << endl;
-	cout << "\tFS typing predicates            " << setw(9) << predicateTyping                 << " " << setprecision(6) << double(predicateTyping                ) / clauseCount << endl;
-	cout << "\tFS parameter (not) equals       " << setw(9) << parameterEqualsConstraints      << " " << setprecision(6) << double(parameterEqualsConstraints     ) / clauseCount << endl;
-	cout << "\tFS prec met                     " << setw(9) << precSupport                     << " " << setprecision(6) << double(precSupport                    ) / clauseCount << endl;
-	cout << "\tFS add effects                  " << setw(9) << addEffects                      << " " << setprecision(6) << double(addEffects                     ) / clauseCount << endl; 
-	cout << "\tFS del effects                  " << setw(9) << delEffects                      << " " << setprecision(6) << double(delEffects                     ) / clauseCount << endl; 
-	cout << "\tFS frame equals                 " << setw(9) << frameEqual                      << " " << setprecision(6) << double(frameEqual                     ) / clauseCount << endl;
-	cout << "\tFS frame implies                " << setw(9) << frameImplies                    << " " << setprecision(6) << double(frameImplies                   ) / clauseCount << endl;
-	cout << "\tFS equals (with state)          " << setw(9) << equals                          << " " << setprecision(6) << double(equals                         ) / clauseCount << endl;
-	cout << "\tFS init support                 " << setw(9) << initSupp                        << " " << setprecision(6) << double(initSupp                       ) / clauseCount << endl;
-	cout << "\tFS goal achievers               " << setw(9) << goalAchiever                    << " " << setprecision(6) << double(goalAchiever                   ) / clauseCount << endl; 
+	cout << "\tFS max 1 action                 " << setw(9) << oneAction                       << " " << fixed << setprecision(6) << double(oneAction                      ) / clauseCount << endl; 
+	cout << "\tFS max 1 action param value     " << setw(9) << atMostOneParamterValue          << " " << fixed << setprecision(6) << double(atMostOneParamterValue         ) / clauseCount << endl;
+	cout << "\tFS max 1 predicate              " << setw(9) << atMostOnePredicate              << " " << fixed << setprecision(6) << double(atMostOnePredicate             ) / clauseCount << endl;
+	cout << "\tFS max 1 predicate param value  " << setw(9) << atMostOnePredicateValueArgument << " " << fixed << setprecision(6) << double(atMostOnePredicateValueArgument) / clauseCount << endl;
+	cout << "\tFS typing actions               " << setw(9) << actionTyping                    << " " << fixed << setprecision(6) << double(actionTyping                   ) / clauseCount << endl;
+	cout << "\tFS typing predicates            " << setw(9) << predicateTyping                 << " " << fixed << setprecision(6) << double(predicateTyping                ) / clauseCount << endl;
+	cout << "\tFS parameter (not) equals       " << setw(9) << parameterEqualsConstraints      << " " << fixed << setprecision(6) << double(parameterEqualsConstraints     ) / clauseCount << endl;
+	cout << "\tFS prec met                     " << setw(9) << precSupport                     << " " << fixed << setprecision(6) << double(precSupport                    ) / clauseCount << endl;
+	cout << "\tFS add effects                  " << setw(9) << addEffects                      << " " << fixed << setprecision(6) << double(addEffects                     ) / clauseCount << endl; 
+	cout << "\tFS del effects                  " << setw(9) << delEffects                      << " " << fixed << setprecision(6) << double(delEffects                     ) / clauseCount << endl; 
+	cout << "\tFS frame equals                 " << setw(9) << frameEqual                      << " " << fixed << setprecision(6) << double(frameEqual                     ) / clauseCount << endl;
+	cout << "\tFS frame implies                " << setw(9) << frameImplies                    << " " << fixed << setprecision(6) << double(frameImplies                   ) / clauseCount << endl;
+	cout << "\tFS equals (with state)          " << setw(9) << equals                          << " " << fixed << setprecision(6) << double(equals                         ) / clauseCount << endl;
+	cout << "\tFS init support                 " << setw(9) << initSupp                        << " " << fixed << setprecision(6) << double(initSupp                       ) / clauseCount << endl;
+	cout << "\tFS goal achievers               " << setw(9) << goalAchiever                    << " " << fixed << setprecision(6) << double(goalAchiever                   ) / clauseCount << endl; 
 
 	DEBUG(cout << "Starting solver" << endl);
 	bool* stopFlag = nullptr;
