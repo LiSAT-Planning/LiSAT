@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <cstdlib>
 
+int clauseCount = 0;
+
 extern "C" {
 
 /**
@@ -53,6 +55,7 @@ IPASIR_API void ipasir_release (void * solver){
  * arguments in API functions.
  */
 IPASIR_API void ipasir_add (void * solver, int lit_or_zero){
+	if (lit_or_zero == 0) clauseCount++;
 	kissat_add((kissat*)solver,lit_or_zero);
 }
 

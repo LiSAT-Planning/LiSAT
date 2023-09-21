@@ -1,6 +1,7 @@
 #ifndef _kissat_h_INCLUDED
 #define _kissat_h_INCLUDED
 
+
 extern "C" {
 
 typedef struct kissat kissat;

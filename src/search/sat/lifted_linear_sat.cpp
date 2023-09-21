@@ -15,6 +15,8 @@
 
 using namespace std;
 
+extern int clauseCount;
+
 extern map<int,map<int,int>> actionArgumentPositions;
 extern int numberOfArgumentPositions;
 extern map<int,int> firstArgumentOfType;
@@ -1267,6 +1269,25 @@ bool LiftedLinearSAT::callSolver(sat_capsule & capsule, void* solver, const Task
 
 	cout << "Generated Variables " << setw(10) << capsule.number_of_variables <<
 		" Clauses: " << setw(10) << get_number_of_clauses() << " length " << planLength << endl;
+	cout << "Number of clauses submitted to solver: " << clauseCount << endl; 
+
+	cout << "counted: " << 
+oneAction +
+atMostOneParamterValue +
+atMostOnePredicate +
+variableInitMaintenance +
+precSupport +
+equals +
+initSupp +
+staticInitSupp +
+actionTyping +
+predicateTyping +
+equalsPrecs +
+achieverImplications +
+noDeleter +
+goalAchiever +
+goalDeleter +
+nullary << endl;
 	cout << "\tone action         " << setw(9) << oneAction << endl; 
 	cout << "\tmax 1 param value  " << setw(9) << atMostOneParamterValue << endl;
 	cout << "\tmax 1 predicate    " << setw(9) << atMostOnePredicate << endl;
@@ -1326,7 +1347,7 @@ bool LiftedLinearSAT::callSolver(sat_capsule & capsule, void* solver, const Task
 	// extract the plan
 	vector<LiftedOperatorId> plan;
 	for (int time = 0; time < planLength; time++){
-		DEBUB(cout << "timestep " << time << endl);
+		DEBUG(cout << "timestep " << time << endl);
 		for (size_t action = 0; action < task.actions.size(); action++){
 			int var = actionVars[time][action];
 			if (ipasir_val(solver,var) > 0){
