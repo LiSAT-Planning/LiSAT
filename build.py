@@ -47,8 +47,9 @@ def build(debug_flag, sat, ipasir):
         cmakeArguments.append('-DSAT=ON')
         if ipasir:
             cmakeArguments.append('-DKISSAT=OFF')
+        else:
+            cmakeArguments.append('-DKISSAT=ON')
         cmakeArguments.append('-DSAT_DIR=' + sat)
-
     subprocess.check_call(cmakeArguments,
                           cwd=BUILD_SEARCH_DIR)
     subprocess.check_call(['make', '-j5'], cwd=BUILD_SEARCH_DIR)
