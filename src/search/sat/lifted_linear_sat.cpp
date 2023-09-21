@@ -33,6 +33,50 @@ vector<vector<pair<vector<int>,int>>> supportingPredicateTuples; // predicate
 
 
 LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
+
+	int maximumNetChange = 0;
+	for (size_t action = 0; action < task.actions.size(); action++){
+        DEBUG(cout << "\t" << time << " " << action << " " << task.actions[action].get_name() << " = " << actionVar << endl);
+
+		const auto effs = task.actions[action].get_effects();
+		const auto precs = task.actions[action].get_precondition();
+		int netChange = 0;
+        for (size_t eff = 0; eff < effs.size(); eff++) {
+			const auto & effObjec = effs[eff];
+			int predicate = effObjec.predicate_symbol;
+
+			// search for it in the preconditions
+			bool balancer = false;
+		    for (size_t prec = 0; prec < precs.size(); prec++) {
+				const auto & precObjec = precs[prec];
+				int prePredicate = precObjec.predicate_symbol;
+				if (prePredicate != predicate) continue;
+
+				bool bad = false;
+				for (size_t i = 0; !bad && i < precObjec.arguments.size(); i++){
+					if (precObjec.arguments[i].index != effObjec.arguments[i].index) bad = true;
+					if (precObjec.arguments[i].constant != effObjec.arguments[i].constant) bad = true;
+				}
+				if (!bad) balancer = true;
+			}
+
+			cout << "EFF " << eff << " " << balancer << " " << effObjec.negated << endl;
+			
+			if (effObjec.negated){
+				if (balancer) netChange--;
+			} else {
+				if (!balancer) netChange++;
+			}
+		}
+		cout << "Action " << action << " balance " << netChange << endl;
+		if (netChange > maximumNetChange) maximumNetChange = netChange;
+	}
+
+	cout << "maximumNetChange = " << maximumNetChange << endl;
+
+
+
+
 	numActions = task.actions.size();
     numObjs = task.objects.size();
 
@@ -530,21 +574,20 @@ extern double solverTotal;
 
 int predicateTyping = 0;
 int atMostOnePredicate = 0;
+int atMostOnePredicateValueArgument = 0;
+int addEffects = 0;
+int delEffects = 0;
+int frameEqual = 0;
+int frameImplies = 0;
 
 extern int actionTyping;
 extern int atMostOneParamterValue;
-extern int variableInitMaintenance; 
 extern int precSupport;
 extern int equals;
 extern int initSupp;
-extern int staticInitSupp;
 extern int nullary;
-extern int equalsPrecs; 
-extern int achieverImplications; 
-extern int noDeleter; 
 extern int oneAction; 
 extern int goalAchiever; 
-extern int goalDeleter; 
 
 
 vector<vector<vector<int>>> predicateSlotVariables; // time -> slot -> predicate (contains -1 for static one)
@@ -622,12 +665,15 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 			thisSlotPredicatesAMO.push_back(predicateVar);
 			DEBUG(capsule.registerVariable(predicateVar, to_string(time) + " @ slot " + to_string(slot) + " predicate " + task.predicates[predicate].getName()));
 		}
+		thisTimePredicateSlotVariables.push_back(thisSlotPredicates);
+		
+		// at most one predicate per slot
 		int bef = get_number_of_clauses();
 		atMostOne(solver,capsule,thisSlotPredicatesAMO);
 		atLeastOne(solver,capsule,thisSlotPredicatesAMO);
+		atMostOnePredicate += get_number_of_clauses() - bef;
 		bef = get_number_of_clauses();
 		
-		thisTimePredicateSlotVariables.push_back(thisSlotPredicates);
 
 		// This slot parameters
 		std::vector<std::vector<int>> thisSlotParameterVars(numberOfPredicateArgumentPositions);
@@ -648,7 +694,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 		}
 		thisTimeArgumentSlotVariables.push_back(thisSlotParameterVars);
 
-		atMostOneParamterValue += get_number_of_clauses() - bef;
+		atMostOnePredicateValueArgument += get_number_of_clauses() - bef;
 		bef = get_number_of_clauses();
 
 		// predicate types must be correct
@@ -690,11 +736,10 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
     	    }
 		}
 		predicateTyping += get_number_of_clauses() - bef;
-
+		bef = get_number_of_clauses();
 
 
 		// maybe select from init
-		bef = get_number_of_clauses();
 		if (time == 0){
 			for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
 				if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
@@ -779,10 +824,14 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 
 
 void LiftedLinearSAT::generate_goal_assertion(const Task &task, void* solver, sat_capsule & capsule, int width, int time){
+	int bef = get_number_of_clauses();
 	for (int g : task.goal.positive_nullary_goals)
 		assertYes(solver,lastNullary[g]);	
 	for (int g : task.goal.negative_nullary_goals)
 		assertNot(solver,lastNullary[g]);	
+
+	nullary += get_number_of_clauses() - bef;
+	bef = get_number_of_clauses();
 
 
 	const auto goals = task.goal.goal;
@@ -817,6 +866,7 @@ void LiftedLinearSAT::generate_goal_assertion(const Task &task, void* solver, sa
 			atLeastOne(solver,capsule,goalSlotVars);
 		}
 	}
+	goalAchiever += get_number_of_clauses() - bef;
 }
 
 // Generator function for the formula.
@@ -859,10 +909,12 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	actionVars.push_back(actionVarsTime);
 	if (generateBaseFormula) atMostOne(solver,capsule,actionVarsTime);
 	//if (generateBaseFormula) atLeastOne(solver,capsule,actionVarsTime);
+	oneAction += get_number_of_clauses() - bef;
+	bef = get_number_of_clauses();
+
 
 	// generate nullary variables
 	std::unordered_map<int,int> currentNullary;
-
 
 	// generate	varialbes for the action parameters
 	if (generateBaseFormula){
@@ -909,7 +961,6 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 		parameterVars.push_back(parameterVarsTime);
 
 		atMostOneParamterValue += get_number_of_clauses() - bef;
-		bef = get_number_of_clauses();
 	}
 
 	/// action variables
@@ -964,8 +1015,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	vector<vector<vector<int>>> equalAfter = generate_action_state_equality(task, solver, capsule, width, time, time+1);
 
 
-	// preconditions are actually met
 	bef = get_number_of_clauses();
+	// preconditions are actually met
 	for (size_t action = 0; action < task.actions.size(); action++){
 		int actionVar = actionVars[time][action];
         DEBUG(cout << "\t" << time << " " << action << " " << task.actions[action].get_name() << " = " << actionVar << endl);
@@ -1061,8 +1112,6 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 						}
 					}
 				}
-	
-
 			} else {
 				vector<int> precSlotVars;
 				for (int slot = 0; slot < width; slot++){
@@ -1099,12 +1148,12 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 		}
 	}
 	precSupport += get_number_of_clauses() - bef;
+	bef = get_number_of_clauses();
 
 
 	vector<vector<int>> slotsSupporter(width);
 
 	// adding effects
-	bef = get_number_of_clauses();
 	for (size_t action = 0; action < task.actions.size(); action++){
 		int actionVar = actionVars[time][action];
         DEBUG(cout << "\t" << time << " " << action << " " << task.actions[action].get_name() << " = " << actionVar << endl);
@@ -1142,6 +1191,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 					}
 					notAll(solver,equalFact);
 				}
+				delEffects += get_number_of_clauses() - bef;
+				bef = get_number_of_clauses();
 			} else {
 				vector<int> effSlotVars;
 				for (int slot = 0; slot < width; slot++){
@@ -1178,10 +1229,11 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 				// we don't need to force that we have that effect ...
 				//impliesOr(solver,actionVar,effSlotVars);
+				addEffects += get_number_of_clauses() - bef;
+				bef = get_number_of_clauses();
 			}
 		}
 	}
-	precSupport += get_number_of_clauses() - bef;
 
 
 	bef = get_number_of_clauses();
@@ -1257,8 +1309,14 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 			}
 		}
+		
+		frameEqual += get_number_of_clauses() - bef;
+		bef = get_number_of_clauses();
 
+		// if we don't have a supporter for the current value, it must be the old one
 		notImpliesOr(solver, slotEqual, slotsSupporter[slot]);
+		frameImplies += get_number_of_clauses() - bef;
+		bef = get_number_of_clauses();
 	}
 }
 
@@ -1266,45 +1324,41 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 bool LiftedLinearSAT::callSolver(sat_capsule & capsule, void* solver, const Task &task, const std::clock_t & startTime, long long time_limit_in_ms){
 		
 	DEBUG(capsule.printVariables());
-
-	cout << "Generated Variables " << setw(10) << capsule.number_of_variables <<
-		" Clauses: " << setw(10) << get_number_of_clauses() << " length " << planLength << endl;
-	cout << "Number of clauses submitted to solver: " << clauseCount << endl; 
-
-	cout << "counted: " << 
-oneAction +
-atMostOneParamterValue +
+int individuallyCounted = atMostOneParamterValue +
 atMostOnePredicate +
-variableInitMaintenance +
+atMostOnePredicateValueArgument +
+actionTyping +
+predicateTyping +
 precSupport +
 equals +
 initSupp +
-staticInitSupp +
-actionTyping +
-predicateTyping +
-equalsPrecs +
-achieverImplications +
-noDeleter +
 goalAchiever +
-goalDeleter +
-nullary << endl;
-	cout << "\tone action         " << setw(9) << oneAction << endl; 
-	cout << "\tmax 1 param value  " << setw(9) << atMostOneParamterValue << endl;
-	cout << "\tmax 1 predicate    " << setw(9) << atMostOnePredicate << endl;
-	cout << "\tinit maintain      " << setw(9) << variableInitMaintenance << endl;
-	cout << "\tprec support       " << setw(9) << precSupport << endl;
-	cout << "\tequals             " << setw(9) << equals << endl;
-	cout << "\tinit support       " << setw(9) << initSupp << endl;
-	cout << "\tstatic init support" << setw(9) << staticInitSupp << endl;
-	cout << "\ttyping actions     " << setw(9) << actionTyping << endl;
-	cout << "\ttyping predicates  " << setw(9) << predicateTyping << endl;
-	cout << "\tequals precs       " << setw(9) << equalsPrecs << endl; 
-	cout << "\tachiever           " << setw(9) << achieverImplications << endl; 
-	cout << "\tno deleter         " << setw(9) << noDeleter << endl; 
-	cout << "\tgoal achievers     " << setw(9) << goalAchiever << endl; 
-	cout << "\tgoal deleters      " << setw(9) << goalDeleter << endl; 
-	cout << "\tnullary            " << setw(9) << nullary << endl;
+nullary +
+oneAction +
+addEffects + 
+delEffects +
+frameEqual + 
+frameImplies;
 
+	cout << "Generated Variables " << setw(10) << capsule.number_of_variables <<
+		" Clauses: " << setw(10) << get_number_of_clauses() << " length " << planLength << endl;
+	cout << "Number of clauses submitted to solver: " << clauseCount << " individually counded: " << individuallyCounted <<
+			" equalCounted: " << (clauseCount == individuallyCounted) << endl; 
+
+	cout << "\tmax 1 action                 " << setw(9) << oneAction << endl; 
+	cout << "\tmax 1 action param value     " << setw(9) << atMostOneParamterValue << endl;
+	cout << "\tmax 1 predicate              " << setw(9) << atMostOnePredicate << endl;
+	cout << "\tmax 1 predicate param value  " << setw(9) << atMostOnePredicateValueArgument << endl;
+	cout << "\ttyping actions               " << setw(9) << actionTyping << endl;
+	cout << "\ttyping predicates            " << setw(9) << predicateTyping << endl;
+	cout << "\tprec met                     " << setw(9) << precSupport << endl;
+	cout << "\tadd effects                  " << setw(9) << addEffects << endl; 
+	cout << "\tdel effects                  " << setw(9) << delEffects << endl; 
+	cout << "\tframe equals                 " << setw(9) << frameEqual << endl;
+	cout << "\tframe implies                " << setw(9) << frameImplies << endl;
+	cout << "\tequals (with state)          " << setw(9) << equals << endl;
+	cout << "\tinit support                 " << setw(9) << initSupp << endl;
+	cout << "\tgoal achievers               " << setw(9) << goalAchiever << endl; 
 
 	DEBUG(cout << "Starting solver" << endl);
 	bool* stopFlag = nullptr;
@@ -1380,10 +1434,8 @@ nullary << endl;
 
 
 
-utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal, bool incremental) {
-
+utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal, bool incremental, int width) {
 	cout << "You made a terrible mistake!!" << endl;
-
 
 	bool satisficing = !optimal;
 
@@ -1541,8 +1593,6 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 	//	}
 	//} else {
 	
-
-		int width = 30;
 		if (limit == -1) maxLen = 9999999; else maxLen = limit;
 		void* solver;
 		sat_capsule capsule;
@@ -1551,9 +1601,10 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = 20; i < maxLen; i++){
+		for (int i = 0; i < maxLen; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
+				clauseCount = 0;
 				capsule.number_of_variables = 0;
 				DEBUG(capsule.variableNames.clear());
 				reset_number_of_clauses();
@@ -1562,18 +1613,18 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 				// reset formula size counters
 				actionTyping = 0;
 				atMostOneParamterValue = 0;
-				variableInitMaintenance = 0;
+				predicateTyping = 0;
 				precSupport = 0;
 				equals = 0;
 				initSupp = 0;
 				nullary = 0;
-				equalsPrecs = 0; 
-				staticInitSupp = 0;
-				achieverImplications = 0; 
-				noDeleter = 0; 
 				oneAction = 0; 
 				goalAchiever = 0; 
-				goalDeleter = 0; 
+				addEffects = 0;
+				delEffects = 0;
+				frameEqual = 0;
+				frameImplies = 0;
+				atMostOnePredicateValueArgument = 0;
 			}
 
 			std::clock_t start = std::clock();
@@ -1588,6 +1639,8 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 				precSupporterOver.clear();
 				lastNullary.clear();
 				initNotTrueAfter.clear();
+				predicateSlotVariables.clear();
+				argumentSlotVariables.clear();
 			}
 			
 			
@@ -1650,8 +1703,6 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 					return utils::ExitCode::SEARCH_OUT_OF_TIME;
 				}
 			}
-
-			exit(0);
 		}
 	//}
 	return utils::ExitCode::SEARCH_UNSOLVED_INCOMPLETE;
