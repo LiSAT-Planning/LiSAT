@@ -232,7 +232,7 @@ void atMostOneBinomial(void* solver, sat_capsule & capsule, std::vector<int> & i
 void atMostOne(void* solver, sat_capsule & capsule, std::vector<int> & is){
 	if (is.size() <= 1) return; // nothing to do
 
-	if (is.size() < 256){
+	if (is.size() < 32){
 		atMostOneBinomial(solver,capsule,is);
 		return;
 	}
