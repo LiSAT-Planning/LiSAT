@@ -735,8 +735,10 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 		
 		// at most one predicate per slot
 		int bef = get_number_of_clauses();
-		atMostOne(solver,capsule,thisSlotPredicatesAMO);
-		atLeastOne(solver,capsule,thisSlotPredicatesAMO);
+		if (time == 0){ // this should only be really necessary at time 0 as this property gets inherited to all other time steps
+			atMostOne(solver,capsule,thisSlotPredicatesAMO);
+			atLeastOne(solver,capsule,thisSlotPredicatesAMO);
+		}
 		atMostOnePredicate += get_number_of_clauses() - bef;
 		bef = get_number_of_clauses();
 		
@@ -755,8 +757,11 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 				thisSlotParameterVars[paramter][o] = objectVar;
 				DEBUG(capsule.registerVariable(objectVar, to_string(time) + " @ slot " + to_string(slot) + " argument#" + to_string(paramter) + " = const " + task.objects[indexToObj[o + lower]].getName()));
 			}
-			// each parameter can have at most one value
-			atMostOne(solver,capsule,thisSlotParameterVars[paramter]);
+
+			if (time == 0){ // this should only be really necessary at time 0 as this property gets inherited to all other time steps
+				// each parameter can have at most one value
+				atMostOne(solver,capsule,thisSlotParameterVars[paramter]);
+			}
 		}
 		thisTimeArgumentSlotVariables.push_back(thisSlotParameterVars);
 
@@ -1270,48 +1275,25 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 		int actionVar = actionVars[time][action];
         DEBUG(cout << "\t" << time << " " << action << " " << task.actions[action].get_name() << " = " << actionVar << endl);
 
+
+		// we first need to encode the adding effects to have the slot supporter variables to correctly encode the precendence of adds over deletes
+
+		vector<set<int>> thisActionSlotsSupporter(width);
 		const auto effs = task.actions[action].get_effects();
-        for (size_t eff = 0; eff < effs.size(); eff++) {
+		for (size_t eff = 0; eff < effs.size(); eff++) {
 			const auto & effObjec = effs[eff];
 			int predicate = effObjec.predicate_symbol;
 			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
 			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
 			if (task.predicates[predicate].getArity() == 0) continue; 
 
-
-			if (effObjec.negated){
-				// must not be present in any of the slots
-				for (int slot = 0; slot < width; slot++){
-					set<int> equalFact;
-					equalFact.insert(actionVar);
-					equalFact.insert(predicateSlotVariables[time+1][slot][predicate]);
-
-					// iterate over the arguments of the precondition
-					for (size_t iArg = 0; iArg < effObjec.arguments.size(); iArg++){
-						int preconditionVar = effObjec.arguments[iArg].index;
-						const bool pIsConst = effObjec.arguments[iArg].constant;
-						int myParam = predicateArgumentPositions[predicate][iArg];
-
-						// argument in the precondition might be a constant 
-						if (pIsConst){
-							int myObjIndex = objToIndex[preconditionVar]; // is not actually a var, but the number of the constant ...
-							int constantVar = argumentSlotVariables[time+1][slot][myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
-							equalFact.insert(constantVar); 
-						} else {
-							// variable equality
-							equalFact.insert(equalAfter[actionArgumentPositions[action][preconditionVar]][slot][myParam]); 
-						}
-					}
-					notAll(solver,equalFact);
-				}
-				delEffects += get_number_of_clauses() - bef;
-				bef = get_number_of_clauses();
-			} else {
+			if (!effObjec.negated){
 				vector<int> effSlotVars;
 				for (int slot = 0; slot < width; slot++){
 					int effSlotVar = capsule.new_variable();
 					effSlotVars.push_back(effSlotVar);
 					slotsSupporter[slot].push_back(effSlotVar);
+					thisActionSlotsSupporter[slot].insert(effSlotVar);
 					DEBUG(capsule.registerVariable(effSlotVar,to_string(time) + " @ action " + task.actions[action].get_name() + " eff " + to_string(eff) + " slot " + to_string(slot) + " pred " + task.predicates[predicate].getName()));
 
 
@@ -1346,6 +1328,47 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				bef = get_number_of_clauses();
 			}
 		}
+
+
+		for (size_t eff = 0; eff < effs.size(); eff++) {
+			const auto & effObjec = effs[eff];
+			int predicate = effObjec.predicate_symbol;
+			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
+			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
+			if (task.predicates[predicate].getArity() == 0) continue; 
+
+
+			if (effObjec.negated){
+				// must not be present in any of the slots
+				for (int slot = 0; slot < width; slot++){
+					vector<int> equalFact;
+					equalFact.push_back(actionVar);
+					equalFact.push_back(predicateSlotVariables[time+1][slot][predicate]);
+
+					// iterate over the arguments of the precondition
+					for (size_t iArg = 0; iArg < effObjec.arguments.size(); iArg++){
+						int preconditionVar = effObjec.arguments[iArg].index;
+						const bool pIsConst = effObjec.arguments[iArg].constant;
+						int myParam = predicateArgumentPositions[predicate][iArg];
+
+						// argument in the precondition might be a constant 
+						if (pIsConst){
+							int myObjIndex = objToIndex[preconditionVar]; // is not actually a var, but the number of the constant ...
+							int constantVar = argumentSlotVariables[time+1][slot][myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+							equalFact.push_back(constantVar); 
+						} else {
+							// variable equality
+							equalFact.push_back(equalAfter[actionArgumentPositions[action][preconditionVar]][slot][myParam]); 
+						}
+					}
+					andImpliesOr(solver,equalFact,thisActionSlotsSupporter[slot]);
+					//notAll(solver,equalFact);
+				}
+				delEffects += get_number_of_clauses() - bef;
+				bef = get_number_of_clauses();
+			}
+		}
+
 	}
 
 
@@ -1716,7 +1739,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = 0; i < maxLen; i++){
+		for (int i = 15; i < maxLen; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
 				clauseCount = 0;
