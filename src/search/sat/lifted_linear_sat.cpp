@@ -1300,8 +1300,16 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 					implies(solver, -actionVar, -effSlotVar);
 
 					// if we select this slot, we actually have to have the correct fact there
-					andImplies(solver, actionVar, effSlotVar, predicateSlotVariables[time+1][slot][predicate]);
-					DEBUG(cout << "YY " << actionVar << " " << effSlotVar << " " << predicateSlotVariables[time+1][slot][predicate] << endl); 
+					for (size_t p = 0; p < task.predicates.size(); p++){
+						int pVar = predicateSlotVariables[time+1][slot][p];
+						if (pVar == -1) continue; // static or = or type@
+						if (p == predicate)
+							andImplies(solver, actionVar, effSlotVar, pVar);
+						else 
+							andImpliesNot(solver, actionVar, effSlotVar, pVar);
+
+						DEBUG(cout << "YY " << actionVar << " " << effSlotVar << " " << predicateSlotVariables[time+1][slot][predicate] << endl); 
+					}
 
 					// iterate over the arguments of the precondition
 					for (size_t iArg = 0; iArg < effObjec.arguments.size(); iArg++){
