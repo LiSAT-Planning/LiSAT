@@ -4,6 +4,17 @@
 #include <cassert>
 #include <math.h> 
 
+bool no_colors_in_output = false;
+
+std::string color(Color color, std::string text, Mode m, Color background){
+	if (no_colors_in_output) return text;
+	return std::string ()
+		+ "\033[" +std::to_string (m)+ ";" + std::to_string (30 + color) + "m"
+		+ ((background != COLOR_NONE)?("\033[" + std::to_string (40 + background) + "m"):"")
+		+ text
+		+ "\033[0;m"
+  ;
+}
 
 std::string path_string(std::vector<int> & path){
 	std::string s = "";
