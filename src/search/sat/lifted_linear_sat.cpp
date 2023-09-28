@@ -696,6 +696,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			predicateStable[pIndex] = stablePredicates[pIndex];
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "stable " << predicateStable[pIndex] << endl;
 		} else if (maxStablePredicates.count(pIndex)){
+			predicateStable[pIndex] = maxStablePredicates[pIndex]; // this causes *most* of the code related to stable stuff
 			predicateMaxStable[pIndex] = maxStablePredicates[pIndex];
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "max stable " << predicateMaxStable[pIndex] << endl;
 		} else {
@@ -1295,7 +1296,7 @@ vector<vector<vector<vector<int>>>> argumentSlotVariables; // time -> slot -> po
 vector<vector<vector<vector<vector<int>>>>> stablePredicateArgumentSlotVariables; 
 
 vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int actionTime, int stateTime){
-
+	DEBUG(cout << "Starting to generate equality between actions@" << actionTime << " and state@" << stateTime << endl);
 	// variables for argument pos X = slot Y parameter pos Z
 	vector<vector<vector<int>>> planeEqualsVars;
 	bool generatedPlaneVars = false;
@@ -1304,6 +1305,7 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 	
 	int bef = get_number_of_clauses();
 	for (int predicate = 0; predicate < int(task.predicates.size()); predicate++){
+		DEBUG(cout << "Starting to generate equality for predicate " << task.predicates[predicate].getName() <<  endl);
 		vector<vector<vector<int>>> thisPredicateEq;
 		if (task.predicates[predicate].getName().rfind("type@", 0) == 0 || 
 			task.predicates[predicate].getName().rfind("=", 0) == 0||
@@ -1311,6 +1313,7 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 			task.predicates[predicate].getArity() == 0 
 			) {
 			equalsVars.push_back(thisPredicateEq);
+			DEBUG(cout << " ... is actually not necessary" <<  endl);
 			continue; 
 		}
 	
@@ -1323,6 +1326,7 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 		}
 
     	for (int actionParamter = 0; actionParamter < numberOfArgumentPositions; actionParamter++){
+			DEBUG(cout << "\t Action Parameter " << actionParamter <<  endl);
 			vector<vector<int>> eqVars;
 		
 			// how many slots are there depends on what type of predicate this is	
@@ -1330,6 +1334,7 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 			if (isStable) thisWidth = predicateStable[predicate];
 
 			for (int slot = 0; slot < thisWidth; slot++){
+				DEBUG(cout << "\t Slot " << slot <<  endl);
 				vector<int> eqVarsSlot;
 				
 				int numberOfFactParameters = numberOfPredicateArgumentPositions;
@@ -1337,7 +1342,8 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 					numberOfFactParameters = task.predicates[predicate].getArity();
 				}
 
-		   		for (int factParameter = 0; factParameter < numberOfPredicateArgumentPositions; factParameter++){
+		   		for (int factParameter = 0; factParameter < numberOfFactParameters; factParameter++){
+					DEBUG(cout << "\t Fact Parameter " << factParameter << endl);
 					// only generate for non-stable equals that will actually be used
 					if ( !isStable && (
 						(actionTime == stateTime && possibleBeforeEquals.count({actionParamter,factParameter}) == 0) ||
@@ -1368,8 +1374,16 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 					int thisLower = lowerTindex[typeOfArgument[actionParamter]];
 					int thisUpper = upperTindex[typeOfArgument[actionParamter]];
 					
-					int beforeLower = lowerTindex[task.predicates[predicate].getTypes()[factParameter]];
-					int beforeUpper = upperTindex[task.predicates[predicate].getTypes()[factParameter]];
+					int beforeLower;
+					int beforeUpper;
+				
+					if (isStable){	
+						beforeLower = lowerTindex[task.predicates[predicate].getTypes()[factParameter]];
+						beforeUpper = upperTindex[task.predicates[predicate].getTypes()[factParameter]];
+					} else {
+						beforeLower = lowerTindex[typeOfPredicateArgument[factParameter]];
+						beforeUpper = upperTindex[typeOfPredicateArgument[factParameter]];
+					}
 		
 		
 					for(int o = 0; o < numObjs; o++){
@@ -1413,6 +1427,7 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 	}
 
 	equals += get_number_of_clauses() - bef;
+	DEBUG(cout << "DONE generating equality between actions@" << actionTime << " and state@" << stateTime << endl);
 	return equalsVars;
 }
 
@@ -1446,7 +1461,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 		
 		// at most one predicate per slot
 		int bef = get_number_of_clauses();
-		if (time == 0){ // this should only be really necessary at time 0 as this property gets inherited to all other time steps
+		if (time == 0 && thisSlotPredicatesAMO.size() > 0){ // this should only be really necessary at time 0 as this property gets inherited to all other time steps
 			atMostOne(solver,capsule,thisSlotPredicatesAMO);
 			atLeastOne(solver,capsule,thisSlotPredicatesAMO);
 		}
@@ -1483,6 +1498,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 		for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
 			if (task.predicates[predicate].getArity() == 0) continue;
 			if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
+			if (predicateStable.count(predicate)) continue;
 			int predicateVar = thisSlotPredicates[predicate];
     	    DEBUG(cout << "\t" << time << " " << slot << " " << predicate << " " << task.predicates[predicate].getName() << " = " << predicateVar << endl);
 			
@@ -1609,6 +1625,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 		initSupp += get_number_of_clauses() - bef;
 	}
 	
+	DEBUG(cout << "DONE generating normal slots." << endl);
 	
 	vector<vector<vector<vector<int>>>> thisTimeStablePredicateArgumentSlotVariables;
 	
@@ -1621,7 +1638,9 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 			thisTimeStablePredicateArgumentSlotVariables.push_back(thisPredicateAgumentVariables);
 			continue;
 		}
-
+		
+		DEBUG(cout << "Special slots for " << task.predicates[predicate].getName() << endl);
+		
 		// we need to do all this generation for each slot
 		for (int slot = 0; slot < predicateStable[predicate]; slot++){
 			vector<vector<int>> thisSlotAgumentVariables;
@@ -1638,7 +1657,9 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 					DEBUG(capsule.registerVariable(objectVar, to_string(time) + " @ predicate " + task.predicates[predicate].getName() + " slot " + to_string(slot) + " argument#" + to_string(arg) + " = const " + task.objects[indexToObj[obj]].getName()));
 
 					if (time == 0){
-						if (obj == objToIndex[supportingPredicateTuples[predicate][slot].first[arg]])
+						if (supportingPredicateTuples[predicate].size() <= slot) // this takes care of the maxStable predicates
+							assertNot(solver,objectVar);
+						else if (obj == objToIndex[supportingPredicateTuples[predicate][slot].first[arg]])
 							assertYes(solver,objectVar);
 						else
 							assertNot(solver,objectVar);
@@ -1657,6 +1678,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 	predicateSlotVariables.push_back(thisTimePredicateSlotVariables);
 	argumentSlotVariables.push_back(thisTimeArgumentSlotVariables);
 	stablePredicateArgumentSlotVariables.push_back(thisTimeStablePredicateArgumentSlotVariables);
+	DEBUG(cout << "DONE generating all slots." << endl);
 }
 
 
@@ -1682,21 +1704,37 @@ void LiftedLinearSAT::generate_goal_assertion(const Task &task, void* solver, sa
 			// TODO
 		} else {
 			vector<int> goalSlotVars;
-			for (int slot = 0; slot < width; slot++){
+
+			int thisWidth = width;
+			bool stableMode = false;
+			// precondition on a stable predicate. Must be one of the slots we have.
+			if (predicateStable.count(predicate)){
+				thisWidth = predicateStable[predicate];
+				stableMode = true;
+			}
+
+			for (int slot = 0; slot < thisWidth; slot++){
 				int goalSlotVar = capsule.new_variable();
 				goalSlotVars.push_back(goalSlotVar);
 				DEBUG(capsule.registerVariable(goalSlotVar,to_string(time) + " @ goal " + to_string(goal) + " slot " + to_string(slot) + " pred " + task.predicates[predicate].getName()));
 	
 				// if we select this slot, we actually have to have the correct fact there
-				implies(solver, goalSlotVar, predicateSlotVariables[time][slot][predicate]);
+				if (!stableMode)
+					implies(solver, goalSlotVar, predicateSlotVariables[time][slot][predicate]);
 	
 				// iterate over the arguments of the precondition
 				for (size_t iArg = 0; iArg < goalObjec.args.size(); iArg++){
 					int preconditionVar = goalObjec.args[iArg];
-					int myParam = predicateArgumentPositions[predicate][iArg];
 	
 					int myObjIndex = objToIndex[preconditionVar]; 
-					int constantVar = argumentSlotVariables[time][slot][myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+					
+					int constantVar;
+					if (stableMode){
+						constantVar = stablePredicateArgumentSlotVariables[time][predicate][slot][iArg][myObjIndex];
+					} else {
+						int myParam = predicateArgumentPositions[predicate][iArg];
+						constantVar = argumentSlotVariables[time][slot][myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+					}
 					implies(solver, goalSlotVar, constantVar); 
 				}
 			}
@@ -1726,6 +1764,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	int time = planLength-1;
 	cout << "Generating time = " << setw(3) << time << endl;
 
+	// that is to generate the variables for the *next* state, i.e., the effect state
+	generate_predicate_slot_layer(task, solver, capsule, width, time+1); // generate effect slots
 
 	/// action variables
 	std::vector<int> actionVarsTime;
@@ -1745,7 +1785,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	// add variables to overall list (needed for later retrieval)
 	actionVars.push_back(actionVarsTime);
 	if (generateBaseFormula) atMostOne(solver,capsule,actionVarsTime);
-	if (generateBaseFormula) atLeastOne(solver,capsule,actionVarsTime); // XXX debugging
+	//if (generateBaseFormula) atLeastOne(solver,capsule,actionVarsTime); // XXX debugging
 	oneAction += get_number_of_clauses() - bef;
 	bef = get_number_of_clauses();
 
@@ -1847,8 +1887,6 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	}
 	actionTyping += get_number_of_clauses() - bef;
 
-	// that is to generate the variables for the *next* state, i.e., the effect state
-	generate_predicate_slot_layer(task, solver, capsule, width, time+1); // generate effect slots
 	// create equality from these actions to the previous state
 	vector<vector<vector<vector<int>>>> equalBefore = generate_action_state_equality(task, solver, capsule, width, time, time);
 	// create equality from these actions to the next state
@@ -2056,7 +2094,6 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 		if (predicateStable.count(predicate) == 0) continue;
 		stableSlotsSupporter[predicate].resize(predicateStable[predicate]);
 	}
-
 	// adding effects
 	for (size_t action = 0; action < task.actions.size(); action++){
 		int actionVar = actionVars[time][action];
@@ -2252,7 +2289,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	lastNullary = currentNullary;
 
 	// frame axioms	
-	for (int slot = 0; slot < width; slot++){
+	if (numberOfPredicateArgumentPositions) for (int slot = 0; slot < width; slot++){
 		// idea: either the slot got overridden by an effect or is it the same as the slot before
 		int slotEqual = capsule.new_variable();
 		DEBUG(capsule.registerVariable(slotEqual,to_string(time) + " = " + to_string(time+1) + " @ slot " + to_string(slot)));
@@ -2319,7 +2356,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 					// need to subtract the starting values of the types
 					int constBefore = stablePredicateArgumentSlotVariables[time  ][predicate][slot][factParameter][o];
 					int constAfter  = stablePredicateArgumentSlotVariables[time+1][predicate][slot][factParameter][o];
-					andImplies(solver,slotEqual, constBefore, constAfter);
+					if (predicateMaxStable.count(predicate) == 0)
+						andImplies(solver,slotEqual, constBefore, constAfter);
 					andImplies(solver,slotEqual, constAfter, constBefore);
 					//andImplies(solver,constBefore, constAfter, slotEqual); maintenance does not have to be exact -- don't use this one. It actually makes things incorrect
 
@@ -2705,7 +2743,6 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			}
 
 			generate_goal_assertion(task, solver, capsule, width, planLength);
-
 
 			if (callSolver(capsule,solver,task,start)){
 				ipasir_release(solver);
