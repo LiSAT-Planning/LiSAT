@@ -758,7 +758,6 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		cout << endl << endl;
 	}
 
-	exit(0);
 
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////
 	numActions = task.actions.size();
@@ -2713,7 +2712,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = limit; i < limit+1; i++){
+		for (int i = 1; i < limit; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
 				clauseCount = 0;
@@ -2755,6 +2754,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 				initNotTrueAfter.clear();
 				predicateSlotVariables.clear();
 				argumentSlotVariables.clear();
+				stablePredicateArgumentSlotVariables.clear();
 			}
 			
 			
