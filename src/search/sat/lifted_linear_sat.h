@@ -83,7 +83,7 @@ public:
     LiftedLinearSAT(const Task& task);
 	utils::ExitCode solve(const Task& task, int limit, bool optimal, bool incremental, int width);
 	void generate_predicate_slot_layer(const Task &task, void* solver, sat_capsule & capsule, int width, int time);
-	std::vector<std::vector<std::vector<int>>> generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int actionTime, int stateTime);
+	std::vector<std::vector<std::vector<std::vector<int>>>> generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int actionTime, int stateTime);
 	void generate_goal_assertion(const Task &task, void* solver, sat_capsule & capsule, int width, int time);
 	void generate_formula(const Task &task, void* solver, sat_capsule & capsule, int width);
 	bool callSolver(sat_capsule & capsule, void* solver, const Task &task, const std::clock_t & startTime,long long time_limit_in_ms = -1);
