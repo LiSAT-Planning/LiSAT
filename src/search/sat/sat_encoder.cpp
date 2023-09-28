@@ -59,17 +59,21 @@ int sat_capsule::new_variable(){
 
 #ifndef NDEBUG
 void sat_capsule::registerVariable(int v, std::string name){
+	assert(v > 0);
+	if (v <= 0) exit(42);
 	assert(variableNames.count(v) == 0);
 	variableNames[v] = name;	
 }
 
 void sat_capsule::printVariables(){
+	std::cout << "===========================" << std::endl;
 	for (auto & p : variableNames){
 		std::string s = std::to_string(p.first);
 		int x = 4 - s.size();
 		while (x-- && x > 0) std::cout << " ";
 		std::cout << s << " -> " << p.second << std::endl;
 	}
+	std::cout << "===========================" << std::endl;
 }
 #endif
 
