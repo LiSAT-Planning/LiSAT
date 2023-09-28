@@ -334,7 +334,9 @@ int predicateInInit(const Task & task, int pIndex){
 set<int> predicatesMonotoneNegEncoding;
 map<int,int> predicateStable; // maps to size
 map<int,int> predicateMaxStable; // maps to size
-set<int> predicateNoPreMonotone;
+// maps to all tuples that needs to be tracked
+// NOTE: this contains the powerlifted object number and NOT the lisat indices
+map<int,vector<vector<int>>> predicateNoPreMonotone; 
 
 
 
@@ -562,6 +564,24 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 
 		// TODO technically the monotonicity is nice to have, but not really necessary as we can just track all facts that are true in the goal individually
 		if (!occursInPre && isMonotonePos){
+			// we need to track the tuples of this predicate that are in the goal
+			for (size_t goal = 0; goal < task.goal.goal.size(); goal++) {
+				const auto & goalObjec = task.goal.goal[goal];
+				int predicate = goalObjec.predicate;
+				if (predicate != pIndex) {
+					continue;		
+				}
+				
+				vector<int> tup;
+				// iterate over the arguments of the precondition
+				for (size_t iArg = 0; iArg < goalObjec.args.size(); iArg++){
+					int preconditionVar = goalObjec.args[iArg];
+					tup.push_back(preconditionVar);
+				}
+				predicateNoPreMonotone[pIndex].push_back(tup);
+			}
+
+
 			// there might be just one achiever for such predicate	
 			if (achievers.size() == 1){
 				int action = achievers[0];
@@ -615,24 +635,25 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 					auto [achieverAction, achieverEffect] = goalAchieverActionsWithoutSideEffects[action];
 					// so this is a precondition of an action whose sole effect is to make a goal true.
 					set<int> effectVariables;
+					map<int,vector<int>> effectVariablesOriginalPositions;
 					const auto goalEffect = task.actions[achieverAction].get_effects()[achieverEffect];
 
 					for (size_t i = 0; i < goalEffect.arguments.size(); i++){
 						if (goalEffect.arguments[i].constant) continue; // don't care about this one
 						effectVariables.insert(goalEffect.arguments[i].index);
+						effectVariablesOriginalPositions[goalEffect.arguments[i].index].push_back(i);
 					}
 				
 					vector<int> additionalAruguments;	
 					for (size_t i = 0; i < precObjec.arguments.size(); i++){
 						if (precObjec.arguments[i].constant) continue; // don't care about this one
-						if (effectVariables.count(precObjec.arguments[i].index)) continue;
+						if (effectVariables.count(precObjec.arguments[i].index)) {
+							continue;
+						}
 						additionalAruguments.push_back(precObjec.arguments[i].index);
 					}
-					if (additionalAruguments.size() == 0){
-						// TODO keep track!
-						continue; // this is a good precondition - we only need to track its truth as far as it pertains to the goal
-					}
 
+					map<int,int> argumentSingleValue;
 					DEBUG(cout << "precondition has additional arguments:");
 					for (int arg: additionalAruguments){
 						int type = task.actions[action].get_parameters()[arg].type;
@@ -649,11 +670,34 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 						cout << " )");
 						
 						if (possibleValues.size() != 1) occursInPre = true;
-						else {
-							// memorise this one value
-						}
+						else argumentSingleValue[arg] = possibleValues[0];
 					}
 
+					if (occursInPre) continue;
+
+					// we need to generate the tuples that we will actually want to keep track
+					for (vector<int> currentTuple : predicateNoPreMonotone[goalEffect.predicate_symbol]){
+						vector<int> newTuple;
+						bool reject = false;
+						for (size_t i = 0; i < precObjec.arguments.size(); i++){
+							if (precObjec.arguments[i].constant) {
+								newTuple.push_back(precObjec.arguments[i].index);
+							} else if (effectVariables.count(precObjec.arguments[i].index)) {
+								// these are parameters that need to be copied	
+								set<int> valuesFromPositions;
+								for(int tuplePosition : effectVariablesOriginalPositions[precObjec.arguments[i].index])
+									valuesFromPositions.insert(currentTuple[tuplePosition]);
+
+								if (valuesFromPositions.size() > 1) reject = true;
+								else newTuple.push_back(*valuesFromPositions.begin());
+							} else {
+								newTuple.push_back(argumentSingleValue[precObjec.arguments[i].index]);
+							}
+						}
+						if (!reject)
+							predicateNoPreMonotone[pIndex].push_back(newTuple);
+					}
+					
 					DEBUG(cout << endl);
 
 
@@ -688,22 +732,33 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		if (isMonotoneNeg){
 			// monotone neg takes precedence as this can be encoded easily
 			predicatesMonotoneNegEncoding.insert(pIndex);
+			predicateNoPreMonotone.erase(pIndex);
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "monotone neg" << endl;
 		} else if (!occursInPre && isMonotonePos) {
-			predicateNoPreMonotone.insert(pIndex);
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "no precondition monotone" << endl;
+			cout << "insert " << pIndex << " " << predicateNoPreMonotone[pIndex].size() << endl;
+			for (vector<int> tuple : predicateNoPreMonotone[pIndex]){
+				cout << "\t\t";
+				for (int i : tuple) cout << " " << i << " " << task.objects[i].getName();
+				cout << endl;
+			}
+			cout << "DONE" << endl;
 		} else if (stablePredicates.count(pIndex)){
 			predicateStable[pIndex] = stablePredicates[pIndex];
+			predicateNoPreMonotone.erase(pIndex);
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "stable " << predicateStable[pIndex] << endl;
 		} else if (maxStablePredicates.count(pIndex)){
 			predicateStable[pIndex] = maxStablePredicates[pIndex]; // this causes *most* of the code related to stable stuff
 			predicateMaxStable[pIndex] = maxStablePredicates[pIndex];
+			predicateNoPreMonotone.erase(pIndex);
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "max stable " << predicateMaxStable[pIndex] << endl;
 		} else {
 			cout << "\t" << color(COLOR_RED, "Decision: ") << "normal" << endl;
 		}
 		cout << endl << endl;
 	}
+
+	exit(0);
 
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////
 	numActions = task.actions.size();
