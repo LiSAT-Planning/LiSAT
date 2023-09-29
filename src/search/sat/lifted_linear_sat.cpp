@@ -748,7 +748,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			predicateNoPreMonotone.erase(pIndex);
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "stable " << predicateStable[pIndex] << endl;
 		} else if (maxStablePredicates.count(pIndex)){
-			predicateStable[pIndex] = maxStablePredicates[pIndex] + 10; // this causes *most* of the code related to stable stuff
+			predicateStable[pIndex] = maxStablePredicates[pIndex]; // this causes *most* of the code related to stable stuff
 			predicateMaxStable[pIndex] = maxStablePredicates[pIndex];
 			predicateNoPreMonotone.erase(pIndex);
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "max stable " << predicateMaxStable[pIndex] << endl;
