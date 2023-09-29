@@ -2038,6 +2038,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			if (predicateNoPreMonotone.count(predicate) || predicatesMonotoneNegEncoding.count(predicate)){
 				//if (predicatesMonotoneNegEncoding.count(predicate)) continue; // for debugging
 				// special case: this is a monotone predicate that is only relevant w.r.t. to the goal and this one achiever actions that only makes the goal true ...
+				
+				bef = get_number_of_clauses();
 			
 				vector<int> achiever;	
 				// we have to select one of the possible tuples and have that one true
@@ -2070,9 +2072,9 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 					if (badAchiever) {
 						//notAll(solver,impliedVars);
 						continue;
-					} else {
-						andImplies(solver,impliedVars, factVar);
-					}
+					} 
+				
+					andImplies(solver,impliedVars, factVar);
 
 					int chooseThis = capsule.new_variable();
 					achiever.push_back(chooseThis);
@@ -2090,6 +2092,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				}
 				// select one achiever
 				impliesOr(solver,actionVar,achiever);
+				precSupport += get_number_of_clauses() - bef;
+				bef = get_number_of_clauses();
 				continue;
 			}
 			
@@ -2438,13 +2442,12 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 						}
 					}
 				}
-
 				// we don't need to force that we have that effect ...
 				//impliesOr(solver,actionVar,effSlotVars);
-				addEffects += get_number_of_clauses() - bef;
-				bef = get_number_of_clauses();
 			}
 		}
+		addEffects += get_number_of_clauses() - bef;
+		bef = get_number_of_clauses();
 
 		// deleting effects
 		for (size_t eff = 0; eff < effs.size(); eff++) {
@@ -2972,7 +2975,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = 0; i < limit; i++){
+		for (int i = 0; i < limit+1; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
 				clauseCount = 0;
