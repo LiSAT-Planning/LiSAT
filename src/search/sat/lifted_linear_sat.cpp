@@ -808,6 +808,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
     	const auto & p = task.predicates[pIndex];
 		if (p.isStaticPredicate()) continue; // static predicates get special treatment
 		if (predicateStable.count(pIndex)) continue;
+		if (predicateNoPreMonotone.count(pIndex)) continue;
         maxPredicateArity = max(maxPredicateArity, (int) p.getTypes().size());
 		
 		map<int,int> thisCount;
@@ -833,6 +834,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		auto p = task.predicates[pIndex];
 		if (p.isStaticPredicate()) continue; // static predicates get special treatment
 		if (predicateStable.count(pIndex)) continue;
+		if (predicateNoPreMonotone.count(pIndex)) continue;
 		
 		map<int,int> thisCount;
 		for (int para = 0; para < int(p.getTypes().size()); para++){
@@ -1227,6 +1229,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 				
 				// argument in the precondition might be a constant 
 				if (pIsConst) continue;
+				if (predicateNoPreMonotone.count(predicate)) continue;
 
 				if (predicateStable.count(predicate)) {
 					perPredicatePossibleBeforeEquals[predicate].insert({predSlot,iArg});
@@ -1258,7 +1261,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 
 				// argument in the precondition might be a constant 
 				if (pIsConst) continue;
-
+				if (predicateNoPreMonotone.count(predicate)) continue;
 
 				if (predicateStable.count(predicate)) {
 					perPredicatePossibleAfterEquals[predicate].insert({afterSlot,iArg});
@@ -1331,6 +1334,7 @@ int addEffects = 0;
 int delEffects = 0;
 int frameEqual = 0;
 int frameImplies = 0;
+int frameFacts = 0;
 int parameterEqualsConstraints = 0;
 
 extern int actionTyping;
@@ -1348,6 +1352,8 @@ vector<vector<vector<vector<int>>>> argumentSlotVariables; // time -> slot -> po
 
 // time -> predicate -> slot -> position -> constant (0 is the first possible one)
 vector<vector<vector<vector<vector<int>>>>> stablePredicateArgumentSlotVariables; 
+// time -> predicate -> tuple -> variable
+vector<map<int,map<vector<int>,int>>> monotoneIncreasingPredicates;
 
 vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int actionTime, int stateTime){
 	DEBUG(cout << "Starting to generate equality between actions@" << actionTime << " and state@" << stateTime << endl);
@@ -1364,7 +1370,8 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 		if (task.predicates[predicate].getName().rfind("type@", 0) == 0 || 
 			task.predicates[predicate].getName().rfind("=", 0) == 0||
 			task.predicates[predicate].isStaticPredicate() || 
-			task.predicates[predicate].getArity() == 0 
+			task.predicates[predicate].getArity() == 0 ||
+			predicateNoPreMonotone.count(predicate)
 			) {
 			equalsVars.push_back(thisPredicateEq);
 			DEBUG(cout << " ... is actually not necessary" <<  endl);
@@ -1501,7 +1508,9 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 				task.predicates[predicate].getName().rfind("=", 0) == 0||
 				task.predicates[predicate].isStaticPredicate() || 
 				task.predicates[predicate].getArity() == 0 || 
-				predicateStable.count(predicate)
+				predicateStable.count(predicate) ||
+				predicateNoPreMonotone.count(predicate)
+
 				) {
 				thisSlotPredicates.push_back(-1);
 				continue; 
@@ -1553,6 +1562,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 			if (task.predicates[predicate].getArity() == 0) continue;
 			if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
 			if (predicateStable.count(predicate)) continue;
+			if (predicateNoPreMonotone.count(predicate)) continue;
 			int predicateVar = thisSlotPredicates[predicate];
     	    DEBUG(cout << "\t" << time << " " << slot << " " << predicate << " " << task.predicates[predicate].getName() << " = " << predicateVar << endl);
 			
@@ -1598,6 +1608,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 				if (task.predicates[predicate].getArity() == 0) continue;
 				if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
 				if (predicateStable.count(predicate)) continue;
+				if (predicateNoPreMonotone.count(predicate)) continue;
 
 				// consider how many arguments are there
 				int predicateVar = thisSlotPredicates[predicate];
@@ -1727,11 +1738,31 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 		}
 		thisTimeStablePredicateArgumentSlotVariables.push_back(thisPredicateAgumentVariables);
 	}
+
+	DEBUG(cout << "DONE generating limited slots." << endl);
+	DEBUG(cout << "Generating grounded slots" << endl);
+
+	map<int,map<vector<int>,int>> thisTimeNoPreMonotone;
+	for (auto [predicate, tuples] : predicateNoPreMonotone){
+		for (auto tuple : tuples){
+			int factVar = capsule.new_variable();
+			thisTimeNoPreMonotone[predicate][tuple] = factVar;
+			DEBUG(
+				string name = task.predicates[predicate].getName(); 
+				for (int i : tuple) name += " " + task.objects[i].getName();
+				cout << "Generate tuple instance for (" << name + ")" << endl;
+				capsule.registerVariable(factVar, to_string(time) + " @ " + name)
+				);
+			if (time == 0)
+				assertNot(solver,factVar); // these are initially false otherwise we would have removed them from the problem already
+		}
+	}
 	initSupp += get_number_of_clauses() - bef;
 
 	predicateSlotVariables.push_back(thisTimePredicateSlotVariables);
 	argumentSlotVariables.push_back(thisTimeArgumentSlotVariables);
 	stablePredicateArgumentSlotVariables.push_back(thisTimeStablePredicateArgumentSlotVariables);
+	monotoneIncreasingPredicates.push_back(thisTimeNoPreMonotone);
 	DEBUG(cout << "DONE generating all slots." << endl);
 }
 
@@ -1756,6 +1787,9 @@ void LiftedLinearSAT::generate_goal_assertion(const Task &task, void* solver, sa
 			// static preconditions must be handled more efficiently
 			// i.e. directly via support from init
 			// TODO
+		} else if (predicateNoPreMonotone.count(predicate)) {
+			// this is a predicate where we track individual facts
+			assertYes(solver,monotoneIncreasingPredicates[time][predicate][goalObjec.args]);
 		} else {
 			vector<int> goalSlotVars;
 
@@ -1957,8 +1991,11 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			int predicate = precObjec.predicate_symbol;
 			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
 			if (task.predicates[predicate].getArity() == 0) continue; 
-			
-			if (task.predicates[predicate].getName().rfind("=", 0) == 0){
+
+			if (predicateNoPreMonotone.count(predicate)){
+				// special case: this is a monotone predicate that is only relevant w.r.t. to the goal and this one achiever actions that only makes the goal true ...
+				// XXX
+			} else if (task.predicates[predicate].getName().rfind("=", 0) == 0){
 				bef = get_number_of_clauses();
 				if (!precObjec.negated){
 					cout << "ERROR: linear encoding does not support equals constraints in preconditions yet." << endl;
@@ -2146,6 +2183,10 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 		if (predicateStable.count(predicate) == 0) continue;
 		stableSlotsSupporter[predicate].resize(predicateStable[predicate]);
 	}
+	// predicate -> [(action, [parameter or constants])]   numbers 0 or greater indicate variables, number less than 0 indicate constants
+	map<int, vector<pair<int, vector<int> >>  > monotoneIncreasingCausing;
+
+
 	// adding effects
 	for (size_t action = 0; action < task.actions.size(); action++){
 		int actionVar = actionVars[time][action];
@@ -2168,6 +2209,33 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
 			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
 			if (task.predicates[predicate].getArity() == 0) continue; 
+			
+			if (predicateNoPreMonotone.count(predicate)){
+				// special predicate that is only relevant w.r.t to the goal.
+				// This is necessarily an adding effect
+				if (effObjec.negated){
+					cout << "Deleting Effect on monotone increasing predicate ..." << endl;
+					exit(-2);
+				}
+				
+				vector<int> parameterOrConstants;
+
+				for (size_t iArg = 0; iArg < effObjec.arguments.size(); iArg++){
+					int preconditionVar = effObjec.arguments[iArg].index;
+					const bool pIsConst = effObjec.arguments[iArg].constant;
+
+					// argument in the precondition might be a constant 
+					if (pIsConst){
+						parameterOrConstants.push_back(-preconditionVar - 1);
+					} else {
+						parameterOrConstants.push_back(actionArgumentPositions[action][preconditionVar]);
+					}
+				}
+
+				monotoneIncreasingCausing[predicate].push_back({actionVar,parameterOrConstants});
+
+				continue;
+			}
 
 			int thisWidth = width;
 			bool stableMode = false;
@@ -2425,6 +2493,55 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			bef = get_number_of_clauses();
 		}
 	}
+
+	// frame axioms for monotone increasing facts
+	bef = get_number_of_clauses();
+	for (int predicate = 0; predicate < int(task.predicates.size()); predicate++){
+		if (predicateNoPreMonotone.count(predicate) == 0) continue;
+
+		for (auto [tuple, factVar] : monotoneIncreasingPredicates[time+1][predicate]){
+			vector<int> achiever;
+			achiever.push_back(monotoneIncreasingPredicates[time][predicate][tuple]);
+
+			// iterate over possible achievers
+			for (auto [actionVar, parameterVars] : monotoneIncreasingCausing[predicate]){
+				vector<int> impliedVars; impliedVars.push_back(actionVar);
+				bool badAchiever = false;
+				for (size_t pos = 0; pos < parameterVars.size(); pos++){
+					int parameter  = parameterVars[pos];
+					if (parameter < 0){
+						parameter = -parameter - 1;
+
+						if (parameter != tuple[pos]) badAchiever = true;
+					} else {
+						int lower = lowerTindex[typeOfArgument[parameter]];
+						int upper = upperTindex[typeOfArgument[parameter]];
+						int objIndex = objToIndex[tuple[pos]];
+
+						if (objIndex < lower || objIndex > upper)
+							badAchiever = true;
+						else
+							impliedVars.push_back(parameterVarsTime[parameter][objIndex - lower]);
+					}
+				}
+
+				if (badAchiever) continue;
+				int becomesTrue = capsule.new_variable();
+				achiever.push_back(becomesTrue);
+				DEBUG(
+					string name = task.predicates[predicate].getName();
+					for (int i : tuple) name += " " + task.objects[i].getName();
+					capsule.registerVariable(becomesTrue, to_string(time) + " @ " + name + " becomes true from " + to_string(actionVar));
+				);
+				
+				for (int i : impliedVars)
+					implies(solver,becomesTrue, i);
+			
+			}
+			impliesOr(solver,factVar, achiever);
+		}
+	}
+	frameFacts += get_number_of_clauses() - bef;
 }
 
 
@@ -2446,6 +2563,7 @@ addEffects +
 delEffects +
 frameEqual + 
 frameImplies +
+frameFacts + 
 parameterEqualsConstraints;
 
 	cout << "Generated Variables " << setw(10) << capsule.number_of_variables <<
@@ -2465,6 +2583,7 @@ parameterEqualsConstraints;
 	cout << "\tFS del effects                  " << setw(9) << delEffects                      << " " << fixed << setprecision(6) << double(delEffects                     ) / clauseCount << endl; 
 	cout << "\tFS frame equals                 " << setw(9) << frameEqual                      << " " << fixed << setprecision(6) << double(frameEqual                     ) / clauseCount << endl;
 	cout << "\tFS frame implies                " << setw(9) << frameImplies                    << " " << fixed << setprecision(6) << double(frameImplies                   ) / clauseCount << endl;
+	cout << "\tFS frame facts                  " << setw(9) << frameFacts                      << " " << fixed << setprecision(6) << double(frameFacts                     ) / clauseCount << endl;
 	cout << "\tFS equals (with state)          " << setw(9) << equals                          << " " << fixed << setprecision(6) << double(equals                         ) / clauseCount << endl;
 	cout << "\tFS init support                 " << setw(9) << initSupp                        << " " << fixed << setprecision(6) << double(initSupp                       ) / clauseCount << endl;
 	cout << "\tFS goal achievers               " << setw(9) << goalAchiever                    << " " << fixed << setprecision(6) << double(goalAchiever                   ) / clauseCount << endl; 
@@ -2733,6 +2852,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 				delEffects = 0;
 				frameEqual = 0;
 				frameImplies = 0;
+				frameFacts = 0;
 				atMostOnePredicateValueArgument = 0;
 				atMostOnePredicate = 0;
 			   	parameterEqualsConstraints = 0;
@@ -2753,6 +2873,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 				predicateSlotVariables.clear();
 				argumentSlotVariables.clear();
 				stablePredicateArgumentSlotVariables.clear();
+				monotoneIncreasingPredicates.clear();
 			}
 			
 			
