@@ -111,7 +111,7 @@ int calculateOverallBalanceOfPredicate(const Task & task, int pIndex){
 	if (p.getArity() == 0) return 0;
 	if (p.isStaticPredicate()) return 0; // static predicates get special treatment
 
-	cout << endl << endl << "Predicate " << p.getName() << endl;
+	DEBUG(cout << endl << endl << "Predicate " << p.getName() << endl);
 	int maximumNetChange = 0;
 	for (size_t action = 0; action < task.actions.size(); action++){
 		const auto effs = task.actions[action].get_effects();
@@ -122,13 +122,13 @@ int calculateOverallBalanceOfPredicate(const Task & task, int pIndex){
 			if (predicate != pIndex) continue;
 
 			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
-			cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl;
+			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
-		cout << "Action " << action << " balance " << netChange << endl;
+		DEBUG(cout << "Action " << action << " balance " << netChange << endl);
 		if (netChange > maximumNetChange) maximumNetChange = netChange;
 	}
-	cout  << "maximumNetChange = " << maximumNetChange << endl;
+	DEBUG(cout  << "maximumNetChange = " << maximumNetChange << endl);
 	return maximumNetChange;
 }
 
@@ -140,7 +140,7 @@ int calculateOverallBalanceOfPredicatePair(const Task & task, int pIndex, int pI
 	if (p.isStaticPredicate()) return 0; // static predicates get special treatment
 	if (p2.isStaticPredicate()) return 0; // static predicates get special treatment
 
-	cout << endl << endl << "Predicate " << p.getName() << " Predicate " << p2.getName() << endl;
+	DEBUG(cout << endl << endl << "Predicate " << p.getName() << " Predicate " << p2.getName() << endl);
 	int maximumNetChange = 0;
 	for (size_t action = 0; action < task.actions.size(); action++){
 		const auto effs = task.actions[action].get_effects();
@@ -151,24 +151,24 @@ int calculateOverallBalanceOfPredicatePair(const Task & task, int pIndex, int pI
 			if (predicate != pIndex && predicate != pIndex2) continue;
 
 			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
-			cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl;
+			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
 		if (p.getArity() == 0){
 			int thisChange = calculateNullaryEffectBalance(task,action, pIndex);
-			cout << "\tEff " << task.predicates[pIndex].getName() << " " << thisChange << endl;
+			DEBUG(cout << "\tEff " << task.predicates[pIndex].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
 		if (p2.getArity() == 0){
 			int thisChange = calculateNullaryEffectBalance(task,action, pIndex2);
-			cout << "\tEff " << task.predicates[pIndex2].getName() << " " << thisChange << endl;
+			DEBUG(cout << "\tEff " << task.predicates[pIndex2].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
 
-		cout << "Action " << action << " balance " << netChange << endl;
+		DEBUG(cout << "Action " << action << " balance " << netChange << endl);
 		if (netChange > maximumNetChange) maximumNetChange = netChange;
 	}
-	cout  << "maximumNetChange = " << maximumNetChange << endl;
+	DEBUG(cout  << "maximumNetChange = " << maximumNetChange << endl);
 	return maximumNetChange;
 }
 
@@ -183,14 +183,14 @@ int calculateOverallBalanceOfPredicateSet(const Task & task, set<int> pIndices){
 			if (pIndices.count(predicate) == 0) continue;
 
 			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
-			cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl;
+			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
 
-		cout << "Action " << action << " balance " << netChange << endl;
+		DEBUG(cout << "Action " << action << " balance " << netChange << endl);
 		if (netChange > maximumNetChange) maximumNetChange = netChange;
 	}
-	cout  << "maximumNetChange = " << maximumNetChange << endl;
+	DEBUG(cout  << "maximumNetChange = " << maximumNetChange << endl);
 	return maximumNetChange;
 }
 
@@ -199,7 +199,7 @@ int calculateOverallBalanceOfPredicateAndNullary(const Task & task, int pIndex, 
 	if (p.getArity() == 0) return 0;
 	if (p.isStaticPredicate()) return 0; // static predicates get special treatment
 
-	cout << endl << endl << "Predicate " << p.getName() << endl;
+	DEBUG(cout << endl << endl << "Predicate " << p.getName() << endl);
 	int maximumNetChange = 0;
 	for (size_t action = 0; action < task.actions.size(); action++){
 		const auto effs = task.actions[action].get_effects();
@@ -210,20 +210,20 @@ int calculateOverallBalanceOfPredicateAndNullary(const Task & task, int pIndex, 
 			if (predicate != pIndex) continue;
 
 			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
-			cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl;
+			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
 
 		for (int arityZeroPredicate : arityZeroPredicates){
 			int thisChange = calculateNullaryEffectBalance(task,action, arityZeroPredicate);
-			cout << "\tEff " << task.predicates[arityZeroPredicate].getName() << " " << thisChange << endl;
+			DEBUG(cout << "\tEff " << task.predicates[arityZeroPredicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
 		
-		cout << "Action " << task.actions[action].get_name() << " balance " << netChange << endl;
+		DEBUG(cout << "Action " << task.actions[action].get_name() << " balance " << netChange << endl);
 		if (netChange > maximumNetChange) maximumNetChange = netChange;
 	}
-	cout  << "maximumNetChange = " << maximumNetChange << endl;
+	DEBUG(cout  << "maximumNetChange = " << maximumNetChange << endl);
 	return maximumNetChange;
 }
 
@@ -249,7 +249,7 @@ int calculateOverallBalanceOfPredicateInPhasing(const Task & task, int pIndex, v
 	auto p = task.predicates[pIndex];
 	if (p.getArity() == 0) return 0;
 	if (p.isStaticPredicate()) return 0; // static predicates get special treatment
-	cout << endl << endl << "Predicate " << p.getName() << endl;
+	DEBUG(cout << endl << endl << "Predicate " << p.getName() << endl);
 
 	
 	// TODO this is not actually correct. I assume that the phasing structure is a cycle .... but it might not be
@@ -283,9 +283,9 @@ int calculateOverallBalanceOfPredicateInPhasing(const Task & task, int pIndex, v
 	}
 	int increasing = -1;
 	for (auto [a,b] : changesOnPhaseLeave){
-		cout << "Leave " << a << ":";
+		DEBUG(cout << "Leave " << a << ":";
 		for (auto i : b) cout << " " << i;
-		cout << endl;
+		cout << endl);
 
 		if (b.size() > 1) return 1;
 		if (*b.begin() > 1) return 1;
@@ -313,7 +313,7 @@ int predicatePairInInit(const Task & task, int pIndex, int pIndex2){
 	}
 	if (task.predicates[pIndex].getArity() == 0 && task.initial_state.get_nullary_atoms()[pIndex]) numInInit++;
 	if (task.predicates[pIndex2].getArity() == 0 && task.initial_state.get_nullary_atoms()[pIndex2]) numInInit++;
-	cout << "Size in init " << numInInit << endl;
+	DEBUG(cout << "Size in init " << numInInit << endl);
 	return numInInit;
 }
 
@@ -322,7 +322,7 @@ int predicateInInit(const Task & task, int pIndex){
 	    auto rel = task.initial_state.get_relations()[i];
 	    auto tuple = task.initial_state.get_tuples_of_relation(i);
 	    if (task.initial_state.get_relations()[i].predicate_symbol == pIndex){
-			cout << "Size in init " << tuple.size() << endl;
+			DEBUG(cout << "Size in init " << tuple.size() << endl);
 			return tuple.size();
 		}
 	}
@@ -369,7 +369,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 				if (!bad) balancer = true;
 			}
 
-			cout << "EFF " << eff << " " << balancer << " " << effObjec.negated << endl;
+			DEBUG(cout << "EFF " << eff << " " << balancer << " " << effObjec.negated << endl);
 			
 			if (effObjec.negated){
 				if (balancer) netChange--;
@@ -377,11 +377,11 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 				if (!balancer) netChange++;
 			}
 		}
-		cout << "Action " << action << " balance " << netChange << endl;
+		DEBUG(cout << "Action " << action << " balance " << netChange << endl);
 		if (netChange > maximumNetChange) maximumNetChange = netChange;
 	}
 
-	cout << "maximumNetChange = " << maximumNetChange << endl;
+	DEBUG(cout << "maximumNetChange = " << maximumNetChange << endl);
 
 
 	map<int,int> stablePredicates;
@@ -587,7 +587,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			// there might be just one achiever for such predicate	
 			if (achievers.size() == 1){
 				int action = achievers[0];
-				cout << "Only one achiever action: " << task.actions[action].get_name() << endl;
+				DEBUG(cout << "Only one achiever action: " << task.actions[action].get_name() << endl);
 				// check if this an "only achiever" action
 				const auto effs = task.actions[action].get_effects();
 				const auto precs = task.actions[action].get_precondition();
@@ -604,15 +604,14 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 				}
 
 				if (!hasSideEffect){
-					cout << "Only achiever has no side effects. So its preconditions are only relevant if connected to the goal." << endl;
+					DEBUG(cout << "Only achiever has no side effects. So its preconditions are only relevant if connected to the goal." << endl);
 					goalAchieverActionsWithoutSideEffects[action] = {action, effectIndex};	
 				}
 			}
 		}
 	}
 
-
-
+	foundOrdinaryPredicate = false;
 	for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
 		auto p = task.predicates[pIndex];
 		if (p.isStaticPredicate()) continue; // static predicates get special treatment
@@ -699,16 +698,10 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 							}
 						}
 						if (!reject){
-							cout << " Adding tuple " << endl;
 							predicateNoPreMonotone[pIndex].insert(newTuple);
-						} else {
-							cout << " Rejecting tuple " << endl;
 						}
 					}
-					
 					DEBUG(cout << endl);
-
-
 					continue;
 				}
 				occursInPre = true;
@@ -744,13 +737,12 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "monotone neg" << endl;
 		} else if (!occursInPre && isMonotonePos) {
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "no precondition monotone" << endl;
-			cout << "insert " << pIndex << " amount: " << predicateNoPreMonotone[pIndex].size() << endl;
+			DEBUG(cout << "insert " << pIndex << " amount: " << predicateNoPreMonotone[pIndex].size() << endl;
 			for (vector<int> tuple : predicateNoPreMonotone[pIndex]){
 				cout << "\t\t" << task.predicates[pIndex].getName();
 				for (int i : tuple) cout << " " << i << " " << task.objects[i].getName();
 				cout << endl;
-			}
-			cout << "DONE" << endl;
+			});
 		} else if (stablePredicates.count(pIndex)){
 			predicateStable[pIndex] = stablePredicates[pIndex];
 			predicateNoPreMonotone.erase(pIndex);
@@ -762,8 +754,13 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "max stable " << predicateMaxStable[pIndex] << endl;
 		} else {
 			cout << "\t" << color(COLOR_RED, "Decision: ") << "normal" << endl;
+			foundOrdinaryPredicate = true;
 		}
 		cout << endl << endl;
+	}
+
+	if (!foundOrdinaryPredicate){
+		cout << "Found no ordinary predicate. Accepting the run only if W=0." << endl;
 	}
 
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2687,7 +2684,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 }
 
 
-bool LiftedLinearSAT::callSolver(sat_capsule & capsule, void* solver, const Task &task, const std::clock_t & startTime, long long time_limit_in_ms){
+bool LiftedLinearSAT::callSolver(sat_capsule & capsule, void* solver, const Task &task, int width, const std::clock_t & startTime, long long time_limit_in_ms){
 		
 	DEBUG(capsule.printVariables());
 int individuallyCounted = atMostOneParamterValue +
@@ -2709,7 +2706,7 @@ frameFacts +
 parameterEqualsConstraints;
 
 	cout << "Generated Variables " << setw(10) << capsule.number_of_variables <<
-		" Clauses: " << setw(10) << get_number_of_clauses() << " length " << planLength << endl;
+		" Clauses: " << setw(10) << get_number_of_clauses() << " length " << planLength << " width " << width << endl;
 	cout << "Number of clauses submitted to solver: " << clauseCount << " individually counded: " << individuallyCounted <<
 			" equalCounted: " << (clauseCount == individuallyCounted) << endl; 
 
@@ -2805,7 +2802,11 @@ parameterEqualsConstraints;
 
 
 utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal, bool incremental, int width) {
-	cout << "You made a terrible mistake!!" << endl;
+
+	if ((foundOrdinaryPredicate) != (width != 0)){
+		cout << "You made a terrible mistake!!" << endl;
+		exit(-42);
+	}
 
 	bool satisficing = !optimal;
 
@@ -2971,7 +2972,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = limit; i < limit+1; i++){
+		for (int i = 0; i < limit; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
 				clauseCount = 0;
@@ -3061,7 +3062,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 
 			generate_goal_assertion(task, solver, capsule, width, planLength);
 
-			if (callSolver(capsule,solver,task,start)){
+			if (callSolver(capsule,solver,task,width,start)){
 				ipasir_release(solver);
 				cout << "\t\tPlan of length: " << planLength << endl;
 				DEBUG(cout << "\t\tPlan of length: " << planLength << endl);

@@ -51,6 +51,7 @@ private:
     
 	int numObjs = -1;
     int numActions = -1;
+	bool foundOrdinaryPredicate;
 
     int* lowerTindex;
     int* upperTindex;
@@ -86,7 +87,7 @@ public:
 	std::vector<std::vector<std::vector<std::vector<int>>>> generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int actionTime, int stateTime);
 	void generate_goal_assertion(const Task &task, void* solver, sat_capsule & capsule, int width, int time);
 	void generate_formula(const Task &task, void* solver, sat_capsule & capsule, int width);
-	bool callSolver(sat_capsule & capsule, void* solver, const Task &task, const std::clock_t & startTime,long long time_limit_in_ms = -1);
+	bool callSolver(sat_capsule & capsule, void* solver, const Task &task, int width, const std::clock_t & startTime,long long time_limit_in_ms = -1);
 	bool atom_not_satisfied(const DBState &s, const AtomicGoal &atomicGoal) const;
 
     int actionID(int i);
