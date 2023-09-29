@@ -816,6 +816,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		if (p.isStaticPredicate()) continue; // static predicates get special treatment
 		if (predicateStable.count(pIndex)) continue;
 		if (predicateNoPreMonotone.count(pIndex)) continue;
+		if (predicatesMonotoneNegEncoding.count(pIndex)) continue;
         maxPredicateArity = max(maxPredicateArity, (int) p.getTypes().size());
 		
 		map<int,int> thisCount;
@@ -842,6 +843,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		if (p.isStaticPredicate()) continue; // static predicates get special treatment
 		if (predicateStable.count(pIndex)) continue;
 		if (predicateNoPreMonotone.count(pIndex)) continue;
+		if (predicatesMonotoneNegEncoding.count(pIndex)) continue;
 		
 		map<int,int> thisCount;
 		for (int para = 0; para < int(p.getTypes().size()); para++){
@@ -1237,6 +1239,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 				// argument in the precondition might be a constant 
 				if (pIsConst) continue;
 				if (predicateNoPreMonotone.count(predicate)) continue;
+				if (predicatesMonotoneNegEncoding.count(predicate)) continue;
 
 				if (predicateStable.count(predicate)) {
 					perPredicatePossibleBeforeEquals[predicate].insert({predSlot,iArg});
@@ -1269,6 +1272,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 				// argument in the precondition might be a constant 
 				if (pIsConst) continue;
 				if (predicateNoPreMonotone.count(predicate)) continue;
+				if (predicatesMonotoneNegEncoding.count(predicate)) continue;
 
 				if (predicateStable.count(predicate)) {
 					perPredicatePossibleAfterEquals[predicate].insert({afterSlot,iArg});
@@ -1361,6 +1365,7 @@ vector<vector<vector<vector<int>>>> argumentSlotVariables; // time -> slot -> po
 vector<vector<vector<vector<vector<int>>>>> stablePredicateArgumentSlotVariables; 
 // time -> predicate -> tuple -> variable
 vector<map<int,map<vector<int>,int>>> monotoneIncreasingPredicates;
+vector<map<int,map<vector<int>,int>>> monotoneDecreasingPredicates;
 
 vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int actionTime, int stateTime){
 	DEBUG(cout << "Starting to generate equality between actions@" << actionTime << " and state@" << stateTime << endl);
@@ -1378,7 +1383,8 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 			task.predicates[predicate].getName().rfind("=", 0) == 0||
 			task.predicates[predicate].isStaticPredicate() || 
 			task.predicates[predicate].getArity() == 0 ||
-			predicateNoPreMonotone.count(predicate)
+			predicateNoPreMonotone.count(predicate) || 
+			predicatesMonotoneNegEncoding.count(predicate)
 			) {
 			equalsVars.push_back(thisPredicateEq);
 			DEBUG(cout << " ... is actually not necessary" <<  endl);
@@ -1516,8 +1522,8 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 				task.predicates[predicate].isStaticPredicate() || 
 				task.predicates[predicate].getArity() == 0 || 
 				predicateStable.count(predicate) ||
-				predicateNoPreMonotone.count(predicate)
-
+				predicateNoPreMonotone.count(predicate) || 
+				predicatesMonotoneNegEncoding.count(predicate)
 				) {
 				thisSlotPredicates.push_back(-1);
 				continue; 
@@ -1533,7 +1539,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 		int bef = get_number_of_clauses();
 		if (time == 0 && thisSlotPredicatesAMO.size() > 0){ // this should only be really necessary at time 0 as this property gets inherited to all other time steps
 			atMostOne(solver,capsule,thisSlotPredicatesAMO);
-			atLeastOne(solver,capsule,thisSlotPredicatesAMO);
+			//atLeastOne(solver,capsule,thisSlotPredicatesAMO);
 		}
 		atMostOnePredicate += get_number_of_clauses() - bef;
 		bef = get_number_of_clauses();
@@ -1570,6 +1576,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 			if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
 			if (predicateStable.count(predicate)) continue;
 			if (predicateNoPreMonotone.count(predicate)) continue;
+			if (predicatesMonotoneNegEncoding.count(predicate)) continue;
 			int predicateVar = thisSlotPredicates[predicate];
     	    DEBUG(cout << "\t" << time << " " << slot << " " << predicate << " " << task.predicates[predicate].getName() << " = " << predicateVar << endl);
 			
@@ -1616,6 +1623,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 				if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
 				if (predicateStable.count(predicate)) continue;
 				if (predicateNoPreMonotone.count(predicate)) continue;
+				if (predicatesMonotoneNegEncoding.count(predicate)) continue;
 
 				// consider how many arguments are there
 				int predicateVar = thisSlotPredicates[predicate];
@@ -1774,12 +1782,30 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 			}
 		}
 	}
+
+	map<int,map<vector<int>,int>> thisTimeNegMonotone;
+	for (int predicate : predicatesMonotoneNegEncoding){
+		for (auto trueInInit : supportingPredicateTuples[predicate]){
+			vector<int> tuple = trueInInit.first;
+			int factVar = capsule.new_variable();
+			thisTimeNegMonotone[predicate][tuple] = factVar;
+			DEBUG(
+				string name = task.predicates[predicate].getName(); 
+				for (int i : tuple) name += " " + task.objects[i].getName();
+				cout << "Generate tuple instance for (" << name + ")" << endl;
+				capsule.registerVariable(factVar, to_string(time) + " @ " + name)
+				);
+			if (time == 0) // these are always true at the beginning
+				assertYes(solver,factVar);
+		}
+	}
 	initSupp += get_number_of_clauses() - bef;
 
 	predicateSlotVariables.push_back(thisTimePredicateSlotVariables);
 	argumentSlotVariables.push_back(thisTimeArgumentSlotVariables);
 	stablePredicateArgumentSlotVariables.push_back(thisTimeStablePredicateArgumentSlotVariables);
 	monotoneIncreasingPredicates.push_back(thisTimeNoPreMonotone);
+	monotoneDecreasingPredicates.push_back(thisTimeNegMonotone);
 	DEBUG(cout << "DONE generating all slots." << endl);
 }
 
@@ -1807,6 +1833,9 @@ void LiftedLinearSAT::generate_goal_assertion(const Task &task, void* solver, sa
 		} else if (predicateNoPreMonotone.count(predicate)) {
 			// this is a predicate where we track individual facts
 			assertYes(solver,monotoneIncreasingPredicates[time][predicate][goalObjec.args]);
+		} else if (predicatesMonotoneNegEncoding.count(predicate)) {
+			// this is a predicate where we track individual facts
+			assertYes(solver,monotoneDecreasingPredicates[time][predicate][goalObjec.args]);
 		} else {
 			vector<int> goalSlotVars;
 
@@ -2009,14 +2038,18 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
 			if (task.predicates[predicate].getArity() == 0) continue; 
 
-			if (predicateNoPreMonotone.count(predicate)){
+			if (predicateNoPreMonotone.count(predicate) || predicatesMonotoneNegEncoding.count(predicate)){
+				//if (predicatesMonotoneNegEncoding.count(predicate)) continue; // for debugging
 				// special case: this is a monotone predicate that is only relevant w.r.t. to the goal and this one achiever actions that only makes the goal true ...
-				
+			
+				vector<int> achiever;	
 				// we have to select one of the possible tuples and have that one true
-				vector<int> achiever;
-				for (auto [tuple, factVar] : monotoneIncreasingPredicates[time][predicate]){
+				map<vector<int>,int> & tupleSource =
+					(predicateNoPreMonotone.count(predicate))?monotoneIncreasingPredicates[time][predicate]:monotoneDecreasingPredicates[time][predicate];
+				for (auto [tuple, factVar] : tupleSource){
 					bool badAchiever = false;
-					vector<int> impliedVars;
+					set<int> impliedVars;
+					impliedVars.insert(actionVar);
 					for (size_t iArg = 0; iArg < precObjec.arguments.size(); iArg++){
 						int preconditionVar = precObjec.arguments[iArg].index;
 						const bool pIsConst = precObjec.arguments[iArg].constant;
@@ -2033,11 +2066,16 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 							if (objIndex < lower || objIndex > upper)
 								badAchiever = true;
 							else
-								impliedVars.push_back(parameterVarsTime[parameter][objIndex - lower]);
+								impliedVars.insert(parameterVarsTime[parameter][objIndex - lower]);
 						}
 					}
 
-					if (badAchiever) continue;
+					if (badAchiever) {
+						//notAll(solver,impliedVars);
+						continue;
+					} else {
+						andImplies(solver,impliedVars, factVar);
+					}
 
 					int chooseThis = capsule.new_variable();
 					achiever.push_back(chooseThis);
@@ -2049,8 +2087,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 					);
 
 					implies(solver, chooseThis, factVar);
-					//for (int i : impliedVars)
-					//	implies(solver, chooseThis, i);
+					for (int i : impliedVars)
+						implies(solver, chooseThis, i);
 
 				}
 				// select one achiever
@@ -2273,11 +2311,16 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
 			if (task.predicates[predicate].getArity() == 0) continue; 
 			
-			if (predicateNoPreMonotone.count(predicate)){
+			if (predicateNoPreMonotone.count(predicate) || predicatesMonotoneNegEncoding.count(predicate)){
+				//if (predicatesMonotoneNegEncoding.count(predicate)) continue; // for debugging
 				// special predicate that is only relevant w.r.t to the goal.
 				// This is necessarily an adding effect
-				if (effObjec.negated){
+				if (effObjec.negated && predicateNoPreMonotone.count(predicate)){
 					cout << "Deleting Effect on monotone increasing predicate ..." << endl;
+					exit(-2);
+				}
+				if (!effObjec.negated && predicatesMonotoneNegEncoding.count(predicate)){
+					cout << "Adding Effect on monotone decreasing predicate ..." << endl;
 					exit(-2);
 				}
 				
@@ -2295,7 +2338,36 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 					}
 				}
 
-				monotoneIncreasingCausing[predicate].push_back({actionVar,parameterOrConstants});
+
+				if (predicateNoPreMonotone.count(predicate))
+					monotoneIncreasingCausing[predicate].push_back({actionVar,parameterOrConstants});
+				else {
+					for (auto [tuple, factVar] : monotoneDecreasingPredicates[time+1][predicate]){
+						set<int> impliedVars; impliedVars.insert(actionVar);
+						bool badDeleter = false;
+						for (size_t pos = 0; pos < parameterOrConstants.size(); pos++){
+							int parameter  = parameterOrConstants[pos];
+							if (parameter < 0){
+								parameter = -parameter - 1;
+
+								if (parameter != tuple[pos]) badDeleter = true;
+							} else {
+								int lower = lowerTindex[typeOfArgument[parameter]];
+								int upper = upperTindex[typeOfArgument[parameter]];
+								int objIndex = objToIndex[tuple[pos]];
+
+								if (objIndex < lower || objIndex > upper)
+									badDeleter = true;
+								else
+									impliedVars.insert(parameterVarsTime[parameter][objIndex - lower]);
+							}
+						}
+						if (badDeleter) continue;
+
+						// if this action matches the fact then it becomes false
+						andImplies(solver, impliedVars, -factVar);
+					}
+				}
 
 				continue;
 			}
@@ -2342,7 +2414,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 							else 
 								andImpliesNot(solver, actionVar, effSlotVar, pVar);
 
-							DEBUG(cout << "YY " << actionVar << " " << effSlotVar << " " << predicateSlotVariables[time+1][slot][predicate] << endl); 
+							DEBUG(cout << "YYY " << actionVar << " " << effSlotVar << " " << predicateSlotVariables[time+1][slot][predicate] << endl); 
 						}
 					}
 
@@ -2384,6 +2456,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
 			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
 			if (task.predicates[predicate].getArity() == 0) continue; 
+			if (predicateNoPreMonotone.count(predicate) || predicatesMonotoneNegEncoding.count(predicate)) continue;
 
 			int thisWidth = width;
 			bool stableMode = false;
@@ -2431,14 +2504,13 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				bef = get_number_of_clauses();
 			}
 		}
-
 	}
 
 	bef = get_number_of_clauses();
+	DEBUG(cout << "NULLARY" << endl);
 	for (size_t action = 0; action < task.actions.size(); action++){
 		int actionVar = actionVars[time][action];
 		if (generateBaseFormula){
-    	    DEBUG(cout << "\t\tnullary" << endl);
 
 			// nullary preconditions
 			for (int p : *setPosNullaryPrec[action])
@@ -2602,6 +2674,13 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			
 			}
 			impliesOr(solver,factVar, achiever);
+		}
+	}
+	// monotone decreasing are very simple 
+	for (int predicate = 0; predicate < int(task.predicates.size()); predicate++){
+		if (predicatesMonotoneNegEncoding.count(predicate) == 0) continue;
+		for (auto [tuple, factVar] : monotoneDecreasingPredicates[time+1][predicate]){
+			implies(solver,factVar, monotoneDecreasingPredicates[time][predicate][tuple]);
 		}
 	}
 	frameFacts += get_number_of_clauses() - bef;
@@ -2937,6 +3016,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 				argumentSlotVariables.clear();
 				stablePredicateArgumentSlotVariables.clear();
 				monotoneIncreasingPredicates.clear();
+				monotoneDecreasingPredicates.clear();
 			}
 			
 			
