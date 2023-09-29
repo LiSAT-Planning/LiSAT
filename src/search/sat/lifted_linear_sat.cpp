@@ -336,7 +336,7 @@ map<int,int> predicateStable; // maps to size
 map<int,int> predicateMaxStable; // maps to size
 // maps to all tuples that needs to be tracked
 // NOTE: this contains the powerlifted object number and NOT the lisat indices
-map<int,vector<vector<int>>> predicateNoPreMonotone; 
+map<int,set<vector<int>>> predicateNoPreMonotone; 
 
 
 
@@ -500,8 +500,12 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 	}
 
 
+
 	// now try all subsets of the predicates 
 	for (unsigned int s = 1; s < (1 << (allArityNonZeroPredicates.size())); s++){
+		if (__builtin_popcount(s) <= 2) continue;
+		if (__builtin_popcount(s) >= 4) continue;
+
 		set<int> thisList;
 		int initially = 0;
 		for (unsigned int i = 0; i < allArityNonZeroPredicates.size(); i++)
@@ -509,7 +513,6 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 				thisList.insert(allArityNonZeroPredicates[i]);
 				initially += predicateInInit(task,allArityNonZeroPredicates[i]);
 			}
-		if (thisList.size() <= 2) continue; // done previously
 		if (calculateOverallBalanceOfPredicateSet(task,thisList) == 0){
 			cout << color(COLOR_GREEN, "Found stable predicate set ") << "of init size " << initially ;
 			for (int p : thisList) cout << " " << task.predicates[p].getName();
@@ -521,7 +524,6 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 					maxStablePredicates[pIndex] = initially;
 		}
 	}
-
 
 
 	/////////////////////////////////////////////////
@@ -578,7 +580,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 					int preconditionVar = goalObjec.args[iArg];
 					tup.push_back(preconditionVar);
 				}
-				predicateNoPreMonotone[pIndex].push_back(tup);
+				predicateNoPreMonotone[pIndex].insert(tup);
 			}
 
 
@@ -665,16 +667,18 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 									possibleValues.push_back(obj);
 						}
 
-						DEBUG(cout << " " << arg << " (domain: ";
+						DEBUG(cout << " No " << arg << " of type " << type << " " << task.type_names[type] << "  (domain: ";
 					  	for (int obj : possibleValues) cout << " " << obj;
 						cout << " )");
 						
 						if (possibleValues.size() != 1) occursInPre = true;
 						else argumentSingleValue[arg] = possibleValues[0];
 					}
-
+					DEBUG(cout << endl);
 					if (occursInPre) continue;
 
+					DEBUG(cout << "Goal Effect Predicate " << goalEffect.predicate_symbol << " " << task.predicates[goalEffect.predicate_symbol].getName() << 
+							" has " << predicateNoPreMonotone[goalEffect.predicate_symbol].size() << " instances."<< endl);
 					// we need to generate the tuples that we will actually want to keep track
 					for (vector<int> currentTuple : predicateNoPreMonotone[goalEffect.predicate_symbol]){
 						vector<int> newTuple;
@@ -694,8 +698,12 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 								newTuple.push_back(argumentSingleValue[precObjec.arguments[i].index]);
 							}
 						}
-						if (!reject)
-							predicateNoPreMonotone[pIndex].push_back(newTuple);
+						if (!reject){
+							cout << " Adding tuple " << endl;
+							predicateNoPreMonotone[pIndex].insert(newTuple);
+						} else {
+							cout << " Rejecting tuple " << endl;
+						}
 					}
 					
 					DEBUG(cout << endl);
@@ -736,9 +744,9 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "monotone neg" << endl;
 		} else if (!occursInPre && isMonotonePos) {
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "no precondition monotone" << endl;
-			cout << "insert " << pIndex << " " << predicateNoPreMonotone[pIndex].size() << endl;
+			cout << "insert " << pIndex << " amount: " << predicateNoPreMonotone[pIndex].size() << endl;
 			for (vector<int> tuple : predicateNoPreMonotone[pIndex]){
-				cout << "\t\t";
+				cout << "\t\t" << task.predicates[pIndex].getName();
 				for (int i : tuple) cout << " " << i << " " << task.objects[i].getName();
 				cout << endl;
 			}
@@ -757,7 +765,6 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		}
 		cout << endl << endl;
 	}
-
 
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////
 	numActions = task.actions.size();
@@ -1753,8 +1760,18 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 				cout << "Generate tuple instance for (" << name + ")" << endl;
 				capsule.registerVariable(factVar, to_string(time) + " @ " + name)
 				);
-			if (time == 0)
-				assertNot(solver,factVar); // these are initially false otherwise we would have removed them from the problem already
+			if (time == 0){
+				// these are initially false otherwise we would have removed them from the problem already
+				// But: Rover ... Fuck!
+				bool isTrue = false;
+				for (auto trueInInit : supportingPredicateTuples[predicate])
+					if (trueInInit.first == tuple){
+						assertYes(solver,factVar);
+						isTrue = true;
+					}
+				if (!isTrue)
+					assertNot(solver,factVar); 
+			}
 		}
 	}
 	initSupp += get_number_of_clauses() - bef;
@@ -1994,8 +2011,54 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 			if (predicateNoPreMonotone.count(predicate)){
 				// special case: this is a monotone predicate that is only relevant w.r.t. to the goal and this one achiever actions that only makes the goal true ...
-				// XXX
-			} else if (task.predicates[predicate].getName().rfind("=", 0) == 0){
+				
+				// we have to select one of the possible tuples and have that one true
+				vector<int> achiever;
+				for (auto [tuple, factVar] : monotoneIncreasingPredicates[time][predicate]){
+					bool badAchiever = false;
+					vector<int> impliedVars;
+					for (size_t iArg = 0; iArg < precObjec.arguments.size(); iArg++){
+						int preconditionVar = precObjec.arguments[iArg].index;
+						const bool pIsConst = precObjec.arguments[iArg].constant;
+
+						// argument in the precondition might be a constant 
+						if (pIsConst){
+							if (preconditionVar != tuple[iArg]) badAchiever = true;
+						} else {
+							int parameter = actionArgumentPositions[action][preconditionVar];
+							int lower = lowerTindex[typeOfArgument[parameter]];
+							int upper = upperTindex[typeOfArgument[parameter]];
+							int objIndex = objToIndex[tuple[iArg]];
+
+							if (objIndex < lower || objIndex > upper)
+								badAchiever = true;
+							else
+								impliedVars.push_back(parameterVarsTime[parameter][objIndex - lower]);
+						}
+					}
+
+					if (badAchiever) continue;
+
+					int chooseThis = capsule.new_variable();
+					achiever.push_back(chooseThis);
+					DEBUG(
+						string name = task.predicates[predicate].getName();
+						for (int i : tuple) name += " " + task.objects[i].getName();
+						capsule.registerVariable(chooseThis,to_string(time) + " @ action " + task.actions[action].get_name() + " prec " + to_string(prec) + " chooses " + name);
+						cout << to_string(time) + " @ action " + task.actions[action].get_name() + " prec " + to_string(prec) + " chooses " + name << endl;
+					);
+
+					implies(solver, chooseThis, factVar);
+					//for (int i : impliedVars)
+					//	implies(solver, chooseThis, i);
+
+				}
+				// select one achiever
+				impliesOr(solver,actionVar,achiever);
+				continue;
+			}
+			
+			if (task.predicates[predicate].getName().rfind("=", 0) == 0){
 				bef = get_number_of_clauses();
 				if (!precObjec.negated){
 					cout << "ERROR: linear encoding does not support equals constraints in preconditions yet." << endl;
