@@ -748,7 +748,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			predicateNoPreMonotone.erase(pIndex);
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "stable " << predicateStable[pIndex] << endl;
 		} else if (maxStablePredicates.count(pIndex)){
-			predicateStable[pIndex] = maxStablePredicates[pIndex]; // this causes *most* of the code related to stable stuff
+			predicateStable[pIndex] = maxStablePredicates[pIndex] + 10; // this causes *most* of the code related to stable stuff
 			predicateMaxStable[pIndex] = maxStablePredicates[pIndex];
 			predicateNoPreMonotone.erase(pIndex);
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "max stable " << predicateMaxStable[pIndex] << endl;
@@ -1818,8 +1818,6 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	int time = planLength-1;
 	cout << "Generating time = " << setw(3) << time << endl;
 
-	// that is to generate the variables for the *next* state, i.e., the effect state
-	generate_predicate_slot_layer(task, solver, capsule, width, time+1); // generate effect slots
 
 	/// action variables
 	std::vector<int> actionVarsTime;
@@ -1842,7 +1840,6 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	//if (generateBaseFormula) atLeastOne(solver,capsule,actionVarsTime); // XXX debugging
 	oneAction += get_number_of_clauses() - bef;
 	bef = get_number_of_clauses();
-
 
 	// generate nullary variables
 	std::unordered_map<int,int> currentNullary;
@@ -1941,6 +1938,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	}
 	actionTyping += get_number_of_clauses() - bef;
 
+	// that is to generate the variables for the *next* state, i.e., the effect state
+	generate_predicate_slot_layer(task, solver, capsule, width, time+1); // generate effect slots
 	// create equality from these actions to the previous state
 	vector<vector<vector<vector<int>>>> equalBefore = generate_action_state_equality(task, solver, capsule, width, time, time);
 	// create equality from these actions to the next state
@@ -2139,7 +2138,6 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			bef = get_number_of_clauses();
 		}
 	}
-
 
 
 	vector<vector<int>> slotsSupporter(width);
@@ -2354,8 +2352,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			int predAfter  = predicateSlotVariables[time+1][slot][pred];
 			if (predBefore == -1) continue;
 
-			andImplies(solver,slotEqual, predBefore, predAfter);
 			andImplies(solver,slotEqual, predAfter, predBefore);
+			//andImplies(solver,slotEqual, predBefore, predAfter);
 			//andImplies(solver,predBefore, predAfter, slotEqual);  maintenance does not have to be exact -- don't use this one. It actually makes things incorrect
 		}
 		
@@ -2371,8 +2369,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				// need to subtract the starting values of the types
 				int constBefore = argumentSlotVariables[time  ][slot][factParameter][o-lower];
 				int constAfter  = argumentSlotVariables[time+1][slot][factParameter][o-lower];
-				andImplies(solver,slotEqual, constBefore, constAfter);
 				andImplies(solver,slotEqual, constAfter, constBefore);
+				//andImplies(solver,slotEqual, constBefore, constAfter);
 				//andImplies(solver,constBefore, constAfter, slotEqual); maintenance does not have to be exact -- don't use this one. It actually makes things incorrect
 
 			}
@@ -2712,7 +2710,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = 1; i < limit; i++){
+		for (int i = limit; i < limit+1; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
 				clauseCount = 0;
