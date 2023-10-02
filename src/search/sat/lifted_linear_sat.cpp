@@ -227,6 +227,23 @@ int calculateOverallBalanceOfPredicateAndNullary(const Task & task, int pIndex, 
 	return maximumNetChange;
 }
 
+
+int calculateOverallBalanceOfAction(const Task & task, int action, set<int> consideredPredicates){
+	const auto effs = task.actions[action].get_effects();
+	const auto precs = task.actions[action].get_precondition();
+	int netChange = 0;
+	for (size_t eff = 0; eff < effs.size(); eff++) {
+		int predicate = effs[eff].predicate_symbol;
+		if (consideredPredicates.count(predicate) == 0) continue;
+
+		int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
+		DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
+		netChange += thisChange;
+	}
+	DEBUG(cout << "Action " << task.actions[action].get_name() << " balance " << netChange << endl);
+	return netChange;
+}
+
 int calculateOverallBalanceOfNullary(const Task & task, vector<int> arityZeroPredicates){
 	int maximumNetChange = 0;
 	for (size_t action = 0; action < task.actions.size(); action++){
@@ -612,6 +629,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 	}
 
 	foundOrdinaryPredicate = false;
+	set<int> ordinaryPredicates;
 	for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
 		auto p = task.predicates[pIndex];
 		if (p.isStaticPredicate()) continue; // static predicates get special treatment
@@ -755,18 +773,49 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		} else {
 			cout << "\t" << color(COLOR_RED, "Decision: ") << "normal" << endl;
 			foundOrdinaryPredicate = true;
+			ordinaryPredicates.insert(pIndex);
 		}
 		cout << endl << endl;
 	}
 
 	if (!foundOrdinaryPredicate){
 		cout << "Found no ordinary predicate. Accepting the run only if W=0." << endl;
+	} else {
+		cout << "Found " << ordinaryPredicates.size() << " ordinary predicate." << endl;
+		int maxNetNecessary = 0;
+		for (size_t action = 0; action < task.actions.size(); action++){
+			int preSize = 0;
+			const auto precs = task.actions[action].get_precondition();
+			for (size_t prec = 0; prec < precs.size(); prec++) {
+				const auto & precObjec = precs[prec];
+				int prePredicate = precObjec.predicate_symbol;
+				if (ordinaryPredicates.count(prePredicate) == 0) continue;
+				preSize ++;
+			}
+			int change = calculateOverallBalanceOfAction(task,action,ordinaryPredicates);
+			if (change < 0) change = 0;
+			change += preSize;	
+			if (change > maxNetNecessary) maxNetNecessary = change;
+		}
+
+		int goalSize = 0;
+		const auto goals = task.goal.goal;
+		for (size_t goal = 0; goal < goals.size(); goal++) {
+			const auto & goalObjec = goals[goal];
+			int predicate = goalObjec.predicate;
+			if (ordinaryPredicates.count(predicate) == 0) continue;
+			goalSize++;
+		}
+
+		cout << "Maximum net change: " << maxNetNecessary << " goal size: " << goalSize << endl;
+		goalNeededWidth = goalSize;
+		maximumTimeStepNetChange = maxNetNecessary;
 	}
+
 
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////
 	numActions = task.actions.size();
     numObjs = task.objects.size();
-
 
 	////////////////// argument positioning of actions
 	map<int,int> maxNum;

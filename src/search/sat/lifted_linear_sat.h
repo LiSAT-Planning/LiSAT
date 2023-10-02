@@ -48,7 +48,10 @@ private:
     int maxPrec = -1;
 
 	int maxLen;
-    
+   
+	int maximumTimeStepNetChange;
+	int goalNeededWidth;
+
 	int numObjs = -1;
     int numActions = -1;
 	bool foundOrdinaryPredicate;
