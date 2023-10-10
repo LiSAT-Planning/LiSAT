@@ -230,7 +230,6 @@ int calculateOverallBalanceOfPredicateAndNullary(const Task & task, int pIndex, 
 
 int calculateOverallBalanceOfAction(const Task & task, int action, set<int> consideredPredicates){
 	const auto effs = task.actions[action].get_effects();
-	const auto precs = task.actions[action].get_precondition();
 	int netChange = 0;
 	for (size_t eff = 0; eff < effs.size(); eff++) {
 		int predicate = effs[eff].predicate_symbol;
@@ -254,6 +253,34 @@ int calculateOverallBalanceOfNullary(const Task & task, vector<int> arityZeroPre
 			netChange += thisChange;
 		}
 		
+		DEBUG(cout << "Action " << task.actions[action].get_name() << " balance " << netChange << endl);
+		if (netChange > maximumNetChange) maximumNetChange = netChange;
+	}
+	DEBUG(cout  << "maximumNetChange = " << maximumNetChange << endl);
+	return maximumNetChange;
+}
+
+
+int calculateOverallBalanceOfNullaryAndNormal(const Task & task, vector<int> arityZeroPredicates, set<int> normalPredicates){
+	int maximumNetChange = 0;
+	for (size_t action = 0; action < task.actions.size(); action++){
+		int netChange = 0;	
+		for (int arityZeroPredicate : arityZeroPredicates){
+			int thisChange = calculateNullaryEffectBalance(task,action, arityZeroPredicate);
+			DEBUG(cout << "\tEff " << task.predicates[arityZeroPredicate].getName() << " " << thisChange << endl);
+			netChange += thisChange;
+		}
+
+		const auto effs = task.actions[action].get_effects();
+		for (size_t eff = 0; eff < effs.size(); eff++) {
+			int predicate = effs[eff].predicate_symbol;
+			if (normalPredicates.count(predicate) == 0) continue;
+
+			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
+			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
+			netChange += thisChange;
+		}
+	
 		DEBUG(cout << "Action " << task.actions[action].get_name() << " balance " << netChange << endl);
 		if (netChange > maximumNetChange) maximumNetChange = netChange;
 	}
@@ -289,10 +316,16 @@ int calculateOverallBalanceOfPredicateInPhasing(const Task & task, int pIndex, v
 		
 		int leavingPhase = -1;
 		// check whether we leaving a phase
-		for (int arityZeroPredicate : phasingPredicates){
-			int thisChange = calculateNullaryEffectBalance(task,action, arityZeroPredicate);
+		for (int phasingPredicate : phasingPredicates){
+			int thisChange;
+			if (task.predicates[phasingPredicate].getArity() == 0)
+				thisChange = calculateNullaryEffectBalance(task, action, phasingPredicate);
+			else{
+				set<int> __singleton; __singleton.insert(phasingPredicate);
+				thisChange = calculateOverallBalanceOfAction(task,action,__singleton);
+			}
 			if (thisChange == -1)
-				leavingPhase = arityZeroPredicate;
+				leavingPhase = phasingPredicate;
 		}
 
 		if (leavingPhase == -1) return 1; // might increase ...
@@ -360,6 +393,73 @@ map<int,set<vector<int>>> predicateNoPreMonotone;
 
 
 LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
+	DEBUG(
+    cout << endl << "Initial state (static):" << endl;
+    for (tSize i = 0; i < task.get_static_info().get_relations().size(); i++) {
+        auto rel = task.get_static_info().get_relations()[i];
+        auto tuple = task.get_static_info().get_tuples_of_relation(i);
+        for (vector<int> groundA: tuple) {
+            cout << "(" << task.predicates[task.get_static_info().get_relations()[i].predicate_symbol].getName();
+            for (int obj: groundA) {
+                cout << " " << task.objects[obj].getName();
+            }
+            cout << ")" << endl;
+        }
+    }
+
+    cout << endl << "Initial state (non-static):" << endl;
+    for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
+        auto rel = task.initial_state.get_relations()[i];
+        auto tuple = task.initial_state.get_tuples_of_relation(i);
+        for (vector<int> groundA: tuple) {
+            cout << "(" << task.predicates[task.initial_state.get_relations()[i].predicate_symbol].getName();
+            for (int obj: groundA) {
+                cout << " " << task.objects[obj].getName();
+            }
+            cout << ")" << endl;
+        }
+    }
+	);
+
+	/////////////////////////// lookup table for the support from the initial state
+	supportingPredicateTuples.resize(task.predicates.size());
+	for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
+		vector<pair<vector<int>,int>> & mySupportingTuples = supportingPredicateTuples[predicate];
+		int currentStartingPos = 0;
+
+		if (!task.predicates[predicate].isStaticPredicate())
+			for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
+			    auto rel = task.initial_state.get_relations()[i];
+			    auto tuple = task.initial_state.get_tuples_of_relation(i);
+				
+				if (predicate != rel.predicate_symbol) {
+					currentStartingPos += tuple.size();
+					continue;
+				}
+			    
+				for (vector<int> groundA: tuple) {
+			    	mySupportingTuples.push_back({groundA,currentStartingPos++});
+			    }
+			}
+		else
+			// the predicate might be static ...
+			for (tSize i = 0; i < task.get_static_info().get_relations().size(); i++) {
+			    auto rel = task.get_static_info().get_relations()[i];
+			    auto tuple = task.get_static_info().get_tuples_of_relation(i);
+				
+				if (predicate != rel.predicate_symbol) {
+					currentStartingPos += tuple.size();
+					continue;
+				}
+			    
+				for (vector<int> groundA: tuple) {
+			    	mySupportingTuples.push_back({groundA,currentStartingPos++});
+			    }
+			}
+	}
+
+
+	/// stability and net change calculations
 
 	int maximumNetChange = 0;
 	for (size_t action = 0; action < task.actions.size(); action++){
@@ -423,10 +523,9 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		if (task.predicates[pIndex].getArity() == 0) allArityZeroPredicates.push_back(pIndex);
 		else allArityNonZeroPredicates.push_back(pIndex);
 	}
-
+	cout << "Found Nullaries: " << allArityZeroPredicates.size() << " and Non-Nullaries: " << allArityNonZeroPredicates.size() << endl; 
 
 	vector<int> phasingStructure;
-
 	for (unsigned int s = 1; s < (1 << (allArityZeroPredicates.size())); s++){
 		vector<int> thisList;
 		int initially = 0;
@@ -441,16 +540,44 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		int netChange = calculateOverallBalanceOfNullary(task,thisList);
 
 		if (netChange == 0){
-			cout << color(COLOR_YELLOW, "Found Plan Phasing Structure:");
+			if (thisList.size() > phasingStructure.size()){
+				phasingStructure = thisList;
+			}
+		} else {
+			DEBUG(cout << "Testing ...";
 			for (int i : thisList)
 				cout << " " << task.predicates[i].getName();
-			cout << endl;
+			cout << endl);
+			for (unsigned int ss = 1; ss < (1 << (allArityNonZeroPredicates.size())); ss++){
+				if (__builtin_popcount(ss) >= 4) continue;
+				set<int> normalList;
+				int myinitially = initially;
+				for (unsigned int i = 0; i < allArityNonZeroPredicates.size(); i++)
+					if (ss & (1 << i)) {
+						normalList.insert(allArityNonZeroPredicates[i]);
+						myinitially += predicateInInit(task,allArityNonZeroPredicates[i]);
+					}
+				if (myinitially != 1) continue;
+				
+				int netChange = calculateOverallBalanceOfNullaryAndNormal(task,thisList, normalList);
 
-			if (thisList.size() > phasingStructure.size())
-				phasingStructure = thisList;
+				if (netChange == 0){
+					if (thisList.size() + normalList.size() > phasingStructure.size()){
+						phasingStructure = thisList;
+						for (int x : normalList) phasingStructure.push_back(x);
+					}
+				}
+			}
 		}
 	}
 
+	if (phasingStructure.size() > 0){
+		cout << color(COLOR_YELLOW, "Found Plan Phasing Structure:");
+		for (int i : phasingStructure)
+			cout << " " << task.predicates[i].getName();
+		cout << endl;
+	}
+	
 	// if there is a phasing structure we might use it to get more maxima 	
 	if (phasingStructure.size())
 		for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
@@ -465,24 +592,24 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		}
 
 
-	for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
-		if (task.predicates[pIndex].getArity() == 0) continue;
-		if (task.predicates[pIndex].isStaticPredicate()) continue; // static predicates get special treatment
-		for (unsigned int s = 1; s < (1 << (allArityZeroPredicates.size())); s++){
-			vector<int> thisList;
-			for (unsigned int i = 0; i < allArityZeroPredicates.size(); i++)
-				if (s & (1 << i)) thisList.push_back(allArityZeroPredicates[i]);
+	//for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
+	//	if (task.predicates[pIndex].getArity() == 0) continue;
+	//	if (task.predicates[pIndex].isStaticPredicate()) continue; // static predicates get special treatment
+	//	for (unsigned int s = 1; s < (1 << (allArityZeroPredicates.size())); s++){
+	//		vector<int> thisList;
+	//		for (unsigned int i = 0; i < allArityZeroPredicates.size(); i++)
+	//			if (s & (1 << i)) thisList.push_back(allArityZeroPredicates[i]);
 
-			int netChange = calculateOverallBalanceOfPredicateAndNullary(task,pIndex,allArityZeroPredicates);
-			if (netChange == 0)
-				cout << task.predicates[pIndex].getName() << color(COLOR_RED, " Net Change: ") << netChange;
-			else
-				cout << task.predicates[pIndex].getName() << " Net Change: " << netChange;
-			for (int i : thisList)
-				cout << " " << task.predicates[i].getName();
-			cout << endl;
-		}
-	}
+	//		int netChange = calculateOverallBalanceOfPredicateAndNullary(task,pIndex,allArityZeroPredicates);
+	//		if (netChange == 0)
+	//			cout << task.predicates[pIndex].getName() << color(COLOR_RED, " Net Change: ") << netChange;
+	//		else
+	//			cout << task.predicates[pIndex].getName() << " Net Change: " << netChange;
+	//		for (int i : thisList)
+	//			cout << " " << task.predicates[i].getName();
+	//		cout << endl;
+	//	}
+	//}
 
 
 
@@ -804,13 +931,21 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			const auto & goalObjec = goals[goal];
 			int predicate = goalObjec.predicate;
 			if (ordinaryPredicates.count(predicate) == 0) continue;
-			goalSize++;
+			// only count those goals that are already true in init - all others have to be established by effects anyhow
+	
+			for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
+				vector<int> tuple = supportingPredicateTuples[predicate][i].first;
+				if (tuple == goalObjec.args)
+					goalSize++;
+			}
 		}
 
 		cout << "Maximum net change: " << maxNetNecessary << " goal size: " << goalSize << endl;
 		goalNeededWidth = goalSize;
 		maximumTimeStepNetChange = maxNetNecessary;
 	}
+
+	//exit(0);
 
 
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1075,70 +1210,6 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
         cout << i << " " << task.predicates[i].getName() << " isStatic " << task.predicates[i].isStaticPredicate() << endl;
     }
 
-	DEBUG(
-    cout << endl << "Initial state (static):" << endl;
-    for (tSize i = 0; i < task.get_static_info().get_relations().size(); i++) {
-        auto rel = task.get_static_info().get_relations()[i];
-        auto tuple = task.get_static_info().get_tuples_of_relation(i);
-        for (vector<int> groundA: tuple) {
-            cout << "(" << task.predicates[task.get_static_info().get_relations()[i].predicate_symbol].getName();
-            for (int obj: groundA) {
-                cout << " " << task.objects[obj].getName();
-            }
-            cout << ")" << endl;
-        }
-    }
-
-    cout << endl << "Initial state (non-static):" << endl;
-    for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
-        auto rel = task.initial_state.get_relations()[i];
-        auto tuple = task.initial_state.get_tuples_of_relation(i);
-        for (vector<int> groundA: tuple) {
-            cout << "(" << task.predicates[task.initial_state.get_relations()[i].predicate_symbol].getName();
-            for (int obj: groundA) {
-                cout << " " << task.objects[obj].getName();
-            }
-            cout << ")" << endl;
-        }
-    }
-	);
-
-	/////////////////////////// lookup table for the support from the initial state
-	supportingPredicateTuples.resize(task.predicates.size());
-	for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
-		vector<pair<vector<int>,int>> & mySupportingTuples = supportingPredicateTuples[predicate];
-		int currentStartingPos = 0;
-
-		if (!task.predicates[predicate].isStaticPredicate())
-			for (tSize i = 0; i < task.initial_state.get_relations().size(); i++) {
-			    auto rel = task.initial_state.get_relations()[i];
-			    auto tuple = task.initial_state.get_tuples_of_relation(i);
-				
-				if (predicate != rel.predicate_symbol) {
-					currentStartingPos += tuple.size();
-					continue;
-				}
-			    
-				for (vector<int> groundA: tuple) {
-			    	mySupportingTuples.push_back({groundA,currentStartingPos++});
-			    }
-			}
-		else
-			// the predicate might be static ...
-			for (tSize i = 0; i < task.get_static_info().get_relations().size(); i++) {
-			    auto rel = task.get_static_info().get_relations()[i];
-			    auto tuple = task.get_static_info().get_tuples_of_relation(i);
-				
-				if (predicate != rel.predicate_symbol) {
-					currentStartingPos += tuple.size();
-					continue;
-				}
-			    
-				for (vector<int> groundA: tuple) {
-			    	mySupportingTuples.push_back({groundA,currentStartingPos++});
-			    }
-			}
-	}
 
 
 	//supportingTuples.resize(task.actions.size());
@@ -3090,31 +3161,37 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 				nullary += get_number_of_clauses() - clausesBefore;
 			}
 
+			// calculate the width we actually need
+			int widthNeeded = (i+1) * maximumTimeStepNetChange + goalNeededWidth;
 
-			// start the incremental search for a plan	
+			// if someone forced us to use lower width ...
+			if (width < widthNeeded) widthNeeded = width;
+
+			cout << color(COLOR_GREEN,"Solving for ") << "length " << i+1 << " with width " << widthNeeded << endl; 
+
 	
 			// if not in incremental mode, we need to generate the formula for all timesteps.
 			if (!incremental){
 				planLength = 0;
-				generate_predicate_slot_layer(task, solver, capsule, width, 0); // generate slots directly after init
+				generate_predicate_slot_layer(task, solver, capsule, widthNeeded, 0); // generate slots directly after init
 			}
 			
 			bool linearIncrease = true;
 			if (!linearIncrease){
 				while (planLength <= (1 << i)-1){
 					planLength++;
-					generate_formula(task,solver,capsule,width);
+					generate_formula(task,solver,capsule,widthNeeded);
 				}
 			} else {
 				while (planLength <= i){
 					planLength++;
-					generate_formula(task,solver,capsule,width);
+					generate_formula(task,solver,capsule,widthNeeded);
 				}
 			}
 
-			generate_goal_assertion(task, solver, capsule, width, planLength);
+			generate_goal_assertion(task, solver, capsule, widthNeeded, planLength);
 
-			if (callSolver(capsule,solver,task,width,start)){
+			if (callSolver(capsule,solver,task,widthNeeded,start)){
 				ipasir_release(solver);
 				cout << "\t\tPlan of length: " << planLength << endl;
 				DEBUG(cout << "\t\tPlan of length: " << planLength << endl);
