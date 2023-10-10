@@ -881,7 +881,8 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			predicateNoPreMonotone.erase(pIndex);
 			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "monotone neg" << endl;
 		} else if (!occursInPre && isMonotonePos) {
-			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "no precondition monotone" << endl;
+			// Attention: this output is needed! We need to force that even if predicateNoPreMonotone[pIndex] is empty, it is contained
+			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "no precondition monotone (size " << predicateNoPreMonotone[pIndex].size() << ")" << endl;
 			DEBUG(cout << "insert " << pIndex << " amount: " << predicateNoPreMonotone[pIndex].size() << endl;
 			for (vector<int> tuple : predicateNoPreMonotone[pIndex]){
 				cout << "\t\t" << task.predicates[pIndex].getName();
@@ -952,6 +953,13 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 	numActions = task.actions.size();
     numObjs = task.objects.size();
 
+	map<int,int> objCount;
+    for (size_t obj = 0; obj < task.objects.size(); obj++) {
+        auto oTypes = task.objects[obj].getTypes();
+        for (size_t i = 0; i < oTypes.size(); i++)
+			objCount[oTypes[i]] += 1;
+	}
+
 	////////////////// argument positioning of actions
 	map<int,int> maxNum;
 
@@ -970,8 +978,10 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 
 	for (auto p : maxNum){
 		firstArgumentOfType[p.first] = numberOfArgumentPositions;
-		for (int i = numberOfArgumentPositions; i < numberOfArgumentPositions + p.second; i++)
+		for (int i = numberOfArgumentPositions; i < numberOfArgumentPositions + p.second; i++){
+			cout << "Action Argument #" << setw(2) << i << " T " << setw(2) << " size " << setw(5) << objCount[p.first] << " " << task.type_names[p.first] << endl;
 			typeOfArgument[i] = p.first;
+		}
 		numberOfArgumentPositions += p.second;
 	}
 
@@ -989,6 +999,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			cout << " " << a << "->" << b;
 		cout << endl;
 	}
+
 	////////////////// argument positioning of actions
 	maxNum.clear();
 
@@ -1013,8 +1024,10 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 	map<int,int> firstPredicateArgumentOfType;
 	for (auto p : maxNum){
 		firstPredicateArgumentOfType[p.first] = numberOfPredicateArgumentPositions;
-		for (int i = numberOfPredicateArgumentPositions; i < numberOfPredicateArgumentPositions + p.second; i++)
+		for (int i = numberOfPredicateArgumentPositions; i < numberOfPredicateArgumentPositions + p.second; i++){
 			typeOfPredicateArgument[i] = p.first;
+			cout << "Predicate Argument #" << setw(2) << i << " T " << setw(2) << " size " << setw(5) << objCount[p.first] << " " << task.type_names[p.first] << endl;
+		}
 		numberOfPredicateArgumentPositions += p.second;
 	}
 
@@ -1041,16 +1054,6 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 
 
 	//////////////////////////////////////////////////////////////////////////
-	map<int,int> objCount;
-    for (size_t obj = 0; obj < task.objects.size(); obj++) {
-        auto oTypes = task.objects[obj].getTypes();
-        for (size_t i = 0; i < oTypes.size(); i++)
-			objCount[oTypes[i]] += 1;
-	}
-
-	for (auto p : maxNum){
-		cout << "T " << setw(2) << p.first << " # " << setw(2) << p.second << " size " << setw(5) << objCount[p.first] << endl;
-	}
 	cout << "Max Arity: " << maxActionArity << " diffSum: " << numberOfArgumentPositions << endl; 
 	//exit(0);
     
@@ -1460,10 +1463,23 @@ int atMostOnePredicate = 0;
 int atMostOnePredicateValueArgument = 0;
 int addEffects = 0;
 int delEffects = 0;
+int delEffectsStable = 0;
 int frameEqual = 0;
 int frameImplies = 0;
 int frameFacts = 0;
 int parameterEqualsConstraints = 0;
+int precSupportStable = 0;
+int precSupportMonotone = 0;
+int staticPrecondition = 0;
+
+int addEffectsStable = 0;
+int delEffectsMonotone = 0;
+int frameMonotoneRising = 0;
+int frameEqualStable = 0;
+int frameImpliesStable = 0;
+int equalsStable = 0;
+int initSuppStable = 0;
+int initSuppGrounded = 0;
 
 extern int actionTyping;
 extern int atMostOneParamterValue;
@@ -1492,7 +1508,6 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 	
 	vector<vector<vector<vector<int>>>> equalsVars;
 	
-	int bef = get_number_of_clauses();
 	for (int predicate = 0; predicate < int(task.predicates.size()); predicate++){
 		DEBUG(cout << "Starting to generate equality for predicate " << task.predicates[predicate].getName() <<  endl);
 		vector<vector<vector<int>>> thisPredicateEq;
@@ -1516,6 +1531,7 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 			continue;
 		}
 
+		int bef = get_number_of_clauses();
     	for (int actionParamter = 0; actionParamter < numberOfArgumentPositions; actionParamter++){
 			DEBUG(cout << "\t Action Parameter " << actionParamter <<  endl);
 			vector<vector<int>> eqVars;
@@ -1609,6 +1625,10 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 			}
 			thisPredicateEq.push_back(eqVars);
 		}
+		if (isStable)
+			equalsStable += get_number_of_clauses() - bef;
+		else
+			equals += get_number_of_clauses() - bef;
 
 		equalsVars.push_back(thisPredicateEq);
 		if (isStable) continue;
@@ -1617,7 +1637,6 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 		generatedPlaneVars = true;
 	}
 
-	equals += get_number_of_clauses() - bef;
 	DEBUG(cout << "DONE generating equality between actions@" << actionTime << " and state@" << stateTime << endl);
 	return equalsVars;
 }
@@ -1870,6 +1889,8 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 		}
 		thisTimeStablePredicateArgumentSlotVariables.push_back(thisPredicateAgumentVariables);
 	}
+	initSuppStable += get_number_of_clauses() - bef;
+	bef = get_number_of_clauses();
 
 	DEBUG(cout << "DONE generating limited slots." << endl);
 	DEBUG(cout << "Generating grounded slots" << endl);
@@ -1916,7 +1937,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 				assertYes(solver,factVar);
 		}
 	}
-	initSupp += get_number_of_clauses() - bef;
+	initSuppGrounded += get_number_of_clauses() - bef;
 
 	predicateSlotVariables.push_back(thisTimePredicateSlotVariables);
 	argumentSlotVariables.push_back(thisTimeArgumentSlotVariables);
@@ -2068,20 +2089,22 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 		//bef = get_number_of_clauses();
 		//variableInitMaintenance += get_number_of_clauses() - bef;
 
-    	for (int paramter = 0; paramter < numberOfArgumentPositions; paramter++){
-			int type = typeOfArgument[paramter];
+    	for (int parameter = 0; parameter < numberOfArgumentPositions; parameter++){
+			int type = typeOfArgument[parameter];
 			int lower = lowerTindex[type];
 			int upper = upperTindex[type];
 			
-			parameterVarsTime[paramter].resize(upper - lower + 1);
+			parameterVarsTime[parameter].resize(upper - lower + 1);
 
 			for (int o = 0; o < upper - lower + 1; o++){
 				int objectVar = capsule.new_variable();
-				parameterVarsTime[paramter][o] = objectVar;
-				DEBUG(capsule.registerVariable(objectVar, to_string(time) + " @ param#" + to_string(paramter) + " = const " + task.objects[indexToObj[o + lower]].getName()));
+				parameterVarsTime[parameter][o] = objectVar;
+				DEBUG(capsule.registerVariable(objectVar, to_string(time) + " @ param#" + to_string(parameter) + " = const " + task.objects[indexToObj[o + lower]].getName()));
 			}
 			// each parameter can have at most one value
-			atMostOne(solver,capsule,parameterVarsTime[paramter]);
+			int x = get_number_of_clauses();
+			atMostOne(solver,capsule,parameterVarsTime[parameter]);
+			DEBUG(cout << "Generated for parameter " << parameter << " objects " << upper - lower + 1 << " clauses " << get_number_of_clauses() - x << endl); 
 		}
 		parameterVars.push_back(parameterVarsTime);
 
@@ -2212,7 +2235,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				}
 				// select one achiever
 				impliesOr(solver,actionVar,achiever);
-				precSupport += get_number_of_clauses() - bef;
+				precSupportMonotone += get_number_of_clauses() - bef;
 				bef = get_number_of_clauses();
 				continue;
 			}
@@ -2343,6 +2366,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 						}
 					}
 				}
+				staticPrecondition += get_number_of_clauses() - bef;
 			} else {
 				vector<int> precSlotVars;
 	
@@ -2392,8 +2416,11 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 
 				impliesOr(solver,actionVar,precSlotVars);
+				if (stableMode)
+					precSupportStable += get_number_of_clauses() - bef;
+				else
+					precSupport += get_number_of_clauses() - bef;
 			}
-			precSupport += get_number_of_clauses() - bef;
 			bef = get_number_of_clauses();
 		}
 	}
@@ -2426,6 +2453,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 		const auto effs = task.actions[action].get_effects();
 		for (size_t eff = 0; eff < effs.size(); eff++) {
+			bef = get_number_of_clauses();
 			const auto & effObjec = effs[eff];
 			int predicate = effObjec.predicate_symbol;
 			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
@@ -2460,9 +2488,9 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				}
 
 
-				if (predicateNoPreMonotone.count(predicate))
+				if (predicateNoPreMonotone.count(predicate)){
 					monotoneIncreasingCausing[predicate].push_back({actionVar,parameterOrConstants});
-				else {
+				} else {
 					for (auto [tuple, factVar] : monotoneDecreasingPredicates[time+1][predicate]){
 						set<int> impliedVars; impliedVars.insert(actionVar);
 						bool badDeleter = false;
@@ -2489,7 +2517,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 						andImplies(solver, impliedVars, -factVar);
 					}
 				}
-
+				
+				delEffectsMonotone += get_number_of_clauses() - bef;
 				continue;
 			}
 
@@ -2565,8 +2594,11 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				// we don't need to force that we have that effect ...
 				//impliesOr(solver,actionVar,effSlotVars);
 			}
+			if (stableMode)
+				addEffectsStable += get_number_of_clauses() - bef;
+			else
+				addEffects += get_number_of_clauses() - bef;
 		}
-		addEffects += get_number_of_clauses() - bef;
 		bef = get_number_of_clauses();
 
 		// deleting effects
@@ -2620,7 +2652,10 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 						andImpliesOr(solver,equalFact,thisActionSlotsSupporter[slot]);
 					//notAll(solver,equalFact);
 				}
-				delEffects += get_number_of_clauses() - bef;
+				if (stableMode)
+					delEffectsStable += get_number_of_clauses() - bef;
+				else
+					delEffects += get_number_of_clauses() - bef;
 				bef = get_number_of_clauses();
 			}
 		}
@@ -2739,12 +2774,12 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				}
 			}
 			
-			frameEqual += get_number_of_clauses() - bef;
+			frameEqualStable += get_number_of_clauses() - bef;
 			bef = get_number_of_clauses();
 
 			// if we don't have a supporter for the current value, it must be the old one
 			notImpliesOr(solver, slotEqual, stableSlotsSupporter[predicate][slot]);
-			frameImplies += get_number_of_clauses() - bef;
+			frameImpliesStable += get_number_of_clauses() - bef;
 			bef = get_number_of_clauses();
 		}
 	}
@@ -2796,6 +2831,9 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			impliesOr(solver,factVar, achiever);
 		}
 	}
+	frameMonotoneRising += get_number_of_clauses() - bef;
+	bef = get_number_of_clauses();
+
 	// monotone decreasing are very simple 
 	for (int predicate = 0; predicate < int(task.predicates.size()); predicate++){
 		if (predicatesMonotoneNegEncoding.count(predicate) == 0) continue;
@@ -2816,13 +2854,25 @@ atMostOnePredicateValueArgument +
 actionTyping +
 predicateTyping +
 precSupport +
+precSupportStable +
+precSupportMonotone + 
+staticPrecondition + 
+addEffectsStable +
+delEffectsMonotone +
+frameMonotoneRising +
+frameEqualStable +
+frameImpliesStable +
+equalsStable +
 equals +
 initSupp +
+initSuppStable +
+initSuppGrounded +
 goalAchiever +
 nullary +
 oneAction +
 addEffects + 
 delEffects +
+delEffectsStable +
 frameEqual + 
 frameImplies +
 frameFacts + 
@@ -2840,14 +2890,26 @@ parameterEqualsConstraints;
 	cout << "\tFS typing actions               " << setw(9) << actionTyping                    << " " << fixed << setprecision(6) << double(actionTyping                   ) / clauseCount << endl;
 	cout << "\tFS typing predicates            " << setw(9) << predicateTyping                 << " " << fixed << setprecision(6) << double(predicateTyping                ) / clauseCount << endl;
 	cout << "\tFS parameter (not) equals       " << setw(9) << parameterEqualsConstraints      << " " << fixed << setprecision(6) << double(parameterEqualsConstraints     ) / clauseCount << endl;
-	cout << "\tFS prec met                     " << setw(9) << precSupport                     << " " << fixed << setprecision(6) << double(precSupport                    ) / clauseCount << endl;
-	cout << "\tFS add effects                  " << setw(9) << addEffects                      << " " << fixed << setprecision(6) << double(addEffects                     ) / clauseCount << endl; 
-	cout << "\tFS del effects                  " << setw(9) << delEffects                      << " " << fixed << setprecision(6) << double(delEffects                     ) / clauseCount << endl; 
-	cout << "\tFS frame equals                 " << setw(9) << frameEqual                      << " " << fixed << setprecision(6) << double(frameEqual                     ) / clauseCount << endl;
-	cout << "\tFS frame implies                " << setw(9) << frameImplies                    << " " << fixed << setprecision(6) << double(frameImplies                   ) / clauseCount << endl;
-	cout << "\tFS frame facts                  " << setw(9) << frameFacts                      << " " << fixed << setprecision(6) << double(frameFacts                     ) / clauseCount << endl;
-	cout << "\tFS equals (with state)          " << setw(9) << equals                          << " " << fixed << setprecision(6) << double(equals                         ) / clauseCount << endl;
-	cout << "\tFS init support                 " << setw(9) << initSupp                        << " " << fixed << setprecision(6) << double(initSupp                       ) / clauseCount << endl;
+	cout << "\tFS prec met general slots       " << setw(9) << precSupport                     << " " << fixed << setprecision(6) << double(precSupport                    ) / clauseCount << endl;
+	cout << "\tFS prec met stable slots        " << setw(9) << precSupportStable               << " " << fixed << setprecision(6) << double(precSupportStable              ) / clauseCount << endl;
+	cout << "\tFS prec met static              " << setw(9) << staticPrecondition              << " " << fixed << setprecision(6) << double(staticPrecondition             ) / clauseCount << endl;
+	cout << "\tFS prec met monotone            " << setw(9) << precSupportMonotone             << " " << fixed << setprecision(6) << double(precSupportMonotone            ) / clauseCount << endl;
+	cout << "\tFS add effects general          " << setw(9) << addEffects                      << " " << fixed << setprecision(6) << double(addEffects                     ) / clauseCount << endl; 
+	cout << "\tFS add effects stable           " << setw(9) << addEffectsStable                << " " << fixed << setprecision(6) << double(addEffectsStable               ) / clauseCount << endl; 
+	cout << "\tFS del effects genera           " << setw(9) << delEffects                      << " " << fixed << setprecision(6) << double(delEffects                     ) / clauseCount << endl; 
+	cout << "\tFS del effects stable           " << setw(9) << delEffectsStable                << " " << fixed << setprecision(6) << double(delEffectsStable               ) / clauseCount << endl; 
+	cout << "\tFS del effects monotone         " << setw(9) << delEffectsMonotone              << " " << fixed << setprecision(6) << double(delEffectsMonotone             ) / clauseCount << endl; 
+	cout << "\tFS frame equals general         " << setw(9) << frameEqual                      << " " << fixed << setprecision(6) << double(frameEqual                     ) / clauseCount << endl;
+	cout << "\tFS frame implies general        " << setw(9) << frameImplies                    << " " << fixed << setprecision(6) << double(frameImplies                   ) / clauseCount << endl;
+	cout << "\tFS frame equals stable          " << setw(9) << frameEqualStable                << " " << fixed << setprecision(6) << double(frameEqualStable               ) / clauseCount << endl;
+	cout << "\tFS frame implies stable         " << setw(9) << frameImpliesStable              << " " << fixed << setprecision(6) << double(frameImpliesStable             ) / clauseCount << endl;
+	cout << "\tFS frame facts monotone rising  " << setw(9) << frameMonotoneRising             << " " << fixed << setprecision(6) << double(frameMonotoneRising            ) / clauseCount << endl;
+	cout << "\tFS frame facts monotone decr.   " << setw(9) << frameFacts                      << " " << fixed << setprecision(6) << double(frameFacts                     ) / clauseCount << endl;
+	cout << "\tFS equals (with state) general  " << setw(9) << equals                          << " " << fixed << setprecision(6) << double(equals                         ) / clauseCount << endl;
+	cout << "\tFS equals (with state) stable   " << setw(9) << equalsStable                    << " " << fixed << setprecision(6) << double(equalsStable                   ) / clauseCount << endl;
+	cout << "\tFS init support general         " << setw(9) << initSupp                        << " " << fixed << setprecision(6) << double(initSupp                       ) / clauseCount << endl;
+	cout << "\tFS init support stable          " << setw(9) << initSuppStable                  << " " << fixed << setprecision(6) << double(initSuppStable                 ) / clauseCount << endl;
+	cout << "\tFS init support ground          " << setw(9) << initSuppGrounded                << " " << fixed << setprecision(6) << double(initSuppGrounded               ) / clauseCount << endl;
 	cout << "\tFS goal achievers               " << setw(9) << goalAchiever                    << " " << fixed << setprecision(6) << double(goalAchiever                   ) / clauseCount << endl; 
 
 	DEBUG(cout << "Starting solver" << endl);
@@ -3109,13 +3171,25 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 				atMostOneParamterValue = 0;
 				predicateTyping = 0;
 				precSupport = 0;
+				precSupportStable = 0;
+				precSupportMonotone = 0;
+				staticPrecondition = 0;
+				addEffectsStable = 0;
+				delEffectsMonotone = 0;
+				frameMonotoneRising = 0;
+				frameEqualStable = 0;
+				frameImpliesStable = 0;
+				equalsStable = 0;
 				equals = 0;
 				initSupp = 0;
+				initSuppStable = 0;
+				initSuppGrounded = 0;
 				nullary = 0;
 				oneAction = 0; 
 				goalAchiever = 0; 
 				addEffects = 0;
 				delEffects = 0;
+				delEffectsStable = 0;
 				frameEqual = 0;
 				frameImplies = 0;
 				frameFacts = 0;
