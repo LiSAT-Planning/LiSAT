@@ -3237,7 +3237,8 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 
 			// calculate the width we actually need
 			int widthNeeded = (i+1) * maximumTimeStepNetChange + goalNeededWidth;
-
+			if (!foundOrdinaryPredicate) widthNeeded = 0;
+			
 			// if someone forced us to use lower width ...
 			if (width < widthNeeded) widthNeeded = width;
 
