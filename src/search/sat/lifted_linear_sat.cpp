@@ -2988,10 +2988,10 @@ parameterEqualsConstraints;
 
 utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal, bool incremental, int width) {
 
-	if ((foundOrdinaryPredicate) != (width != 0)){
-		cout << "You made a terrible mistake!!" << endl;
-		exit(-42);
-	}
+	//if ((foundOrdinaryPredicate) != (width != 0)){
+	//	cout << "You made a terrible mistake!!" << endl;
+	//	exit(-42);
+	//}
 
 	bool satisficing = !optimal;
 
