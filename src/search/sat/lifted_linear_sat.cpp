@@ -2501,6 +2501,9 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 						} else {
 							int argPos = actionArgumentPositions[action][preconditionVar];
 							int lower = lowerTindex[typeOfArgument[argPos]];
+							int upper = upperTindex[typeOfArgument[argPos]];
+							// tuple constant that does not git
+							if (myObjIndex < lower || myObjIndex > upper) continue;
 							int constantVar = parameterVarsTime[argPos][myObjIndex - lower];
 							possibleValues.push_back(constantVar);
 
@@ -2548,6 +2551,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 							}
 							
 							if (!impossible) possibleUpto[subTuple].insert(nextConstantVar);
+							else possibleUpto[subTuple].size(); // ensure that the map entry is there
 						}
 				
 						for (auto & x : possibleUpto){
@@ -3365,7 +3369,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = 0; i < limit+1; i++){
+		for (int i = limit; i < limit+1; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
 				clauseCount = 0;
