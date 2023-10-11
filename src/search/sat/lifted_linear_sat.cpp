@@ -3365,7 +3365,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = limit; i < limit+1; i++){
+		for (int i = 0; i < limit+1; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
 				clauseCount = 0;
