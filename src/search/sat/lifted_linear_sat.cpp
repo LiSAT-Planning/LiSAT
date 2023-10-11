@@ -312,7 +312,6 @@ int calculateOverallBalanceOfPredicateInPhasing(const Task & task, int pIndex, v
 			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
-		if (netChange == 0) continue; // this action does not manipulate predicate p
 		
 		int leavingPhase = -1;
 		// check whether we leaving a phase
@@ -328,7 +327,14 @@ int calculateOverallBalanceOfPredicateInPhasing(const Task & task, int pIndex, v
 				leavingPhase = phasingPredicate;
 		}
 
-		if (leavingPhase == -1) return 1; // might increase ...
+		if (leavingPhase == -1) {
+			if (netChange == 0) {
+				DEBUG(cout << "\tAction " << task.actions[action].get_name() << " has net change 0 and does not leave phase. This is ok." << endl);
+				continue; // this action does not manipulate predicate p
+			}
+			DEBUG(cout << "\tAction " << task.actions[action].get_name() << " has net change " << netChange << " and does not leave phase. This is bad." << endl);
+			return 1; // might increase ...
+		}
 		changesOnPhaseLeave[leavingPhase].insert(netChange);
 	}
 	int increasing = -1;
@@ -390,6 +396,8 @@ map<int,set<vector<int>>> predicateNoPreMonotone;
 
 
 
+map<int,set<int>> leavingActions;
+vector<int> phaseloop;
 
 
 LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
@@ -678,8 +686,86 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		for (int i : phasingStructure)
 			cout << " " << task.predicates[i].getName();
 		cout << endl;
+
+
+		// this might be an "absolute" phasing structure, i.e., a case in which every action leaves a phase ..
+		map<int,int> enteringActions;
+		for (size_t action = 0; action < task.actions.size(); action++){
+			const auto effs = task.actions[action].get_effects();
+			const auto precs = task.actions[action].get_precondition();
+				
+			int leavingPhase = -1;
+			int enteringPhase = -1;
+			// check whether we leaving a phase
+			for (int phasingPredicate : phasingStructure){
+				int thisChange;
+				if (task.predicates[phasingPredicate].getArity() == 0)
+					thisChange = calculateNullaryEffectBalance(task, action, phasingPredicate);
+				else{
+					set<int> __singleton; __singleton.insert(phasingPredicate);
+					thisChange = calculateOverallBalanceOfAction(task,action,__singleton);
+				}
+				if (thisChange == -1)
+					leavingPhase = phasingPredicate;
+				else if (thisChange == 1)
+					enteringPhase = phasingPredicate;
+			}
+			leavingActions[leavingPhase].insert(action);
+			enteringActions[action] = enteringPhase;
+		}
+
+		for (auto [phase, actions] : leavingActions){
+			if (phase != -1)
+				cout << "Phase " << task.predicates[phase].getName() << ":"; 
+			else
+				cout << "No Phase:";
+			for (int action : actions)
+				cout << " " << task.actions[action].get_name();
+			cout << endl;
+		}
+
+		if (leavingActions.count(-1) == 0){
+			// determine the initial phase
+			int initialPhase = -1;
+			for (int phasingPredicate : phasingStructure){
+				if (task.predicates[phasingPredicate].getArity() == 0){
+					if (task.initial_state.get_nullary_atoms()[phasingPredicate])
+						initialPhase = phasingPredicate;
+				} else {
+					if (predicateInInit(task,phasingPredicate))
+						initialPhase = phasingPredicate;
+				}
+			}
+
+			int curPhase = initialPhase;
+			while (curPhase != initialPhase || phaseloop.size() == 0){
+				phaseloop.push_back(curPhase);
+				int nextPhase = -1;
+				bool bad = false;
+				for (int leaving : leavingActions[curPhase]){
+					if (nextPhase == -1)
+						nextPhase = enteringActions[leaving];
+					else if (nextPhase != enteringActions[leaving])
+						bad = true;
+				}
+				if (bad){
+					phaseloop.clear();
+					break;
+				}
+
+				curPhase = nextPhase;
+			}
+
+			if (phaseloop.size()){
+				cout << "Phasing Loop:";
+				for (int phase : phaseloop) cout << " " << task.predicates[phase].getName();
+				cout << endl;
+			}
+
+			//phaseloop.clear();
+		}
 	}
-	
+
 	// if there is a phasing structure we might use it to get more maxima 	
 	if (phasingStructure.size())
 		for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
@@ -692,6 +778,8 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 				maxStablePredicates[pIndex] = predicateInInit(task,pIndex) + 1; // +1 for the potential net change
 			}
 		}
+
+	//exit(0);
 
 
 	//for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
@@ -1472,8 +1560,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 		}
 	}
 
-
-	// adding effects
+	// adding and deleting effects
 	for (size_t action = 0; action < task.actions.size(); action++){
 		const auto effs = task.actions[action].get_effects();
         for (size_t eff = 0; eff < effs.size(); eff++) {
@@ -1717,8 +1804,10 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 								b = argumentSlotVariables[stateTime][slot][factParameter][o-beforeLower];
 							// need to subtract the starting values of the types
 							andImplies(solver,equalsVar, a , b);
-							andImplies(solver,equalsVar, b, a);
-							andImplies(solver,b, a, equalsVar);
+							if (true || actionTime != stateTime){
+								andImplies(solver,equalsVar, b, a);
+								andImplies(solver,b, a, equalsVar); // this one is needed for correctness of deleting effects (i.e. it forces that)
+							}
 						}
 					}
 				}
@@ -2135,15 +2224,19 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	int bef = get_number_of_clauses();
 	// indices: timestep -> parameter -> object
 	int time = planLength-1;
-	cout << "Generating time = " << setw(3) << time << endl;
-
+	int curPhase = phaseloop.size() ? (time % phaseloop.size()) : 0;
+	
+	cout << "Generating time = " << setw(3) << time;
+	if (phaseloop.size())
+		cout << " phase = " << curPhase;
+	cout << endl;
+	
 
 	/// action variables
 	std::vector<int> actionVarsTime;
 	std::vector<std::vector<int>> parameterVarsTime(numberOfArgumentPositions);
 	DEBUG(cout << "\tGenerating Variables for actions." << endl);
 	for (size_t action = 0; action < task.actions.size(); action++){
-
 		int actionVar;
 		if (generateBaseFormula){  
 			actionVar = capsule.new_variable();
@@ -2152,11 +2245,14 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 		} else {
 			actionVar = actionVars[time][action];
 		}
+		if (phaseloop.size() && leavingActions[phaseloop[curPhase]].count(action) == 0){
+			assertNot(solver,actionVar);
+		}
 	}
 	// add variables to overall list (needed for later retrieval)
 	actionVars.push_back(actionVarsTime);
 	if (generateBaseFormula) atMostOne(solver,capsule,actionVarsTime);
-	//if (generateBaseFormula) atLeastOne(solver,capsule,actionVarsTime); // XXX debugging
+	if (generateBaseFormula) atLeastOne(solver,capsule,actionVarsTime);  // only correct for optimal planning
 	oneAction += get_number_of_clauses() - bef;
 	bef = get_number_of_clauses();
 
@@ -2215,6 +2311,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	/// action variables
 	bef = get_number_of_clauses();
 	for (size_t action = 0; action < task.actions.size(); action++){
+		if (phaseloop.size() && leavingActions[phaseloop[curPhase]].count(action) == 0) continue;
+
 		int actionVar = actionVars[time][action];
         DEBUG(cout << "\t" << time << " " << action << " " << task.actions[action].get_name() << " = " << actionVar << endl);
 		
@@ -2269,6 +2367,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 	// preconditions are actually met
 	for (size_t action = 0; action < task.actions.size(); action++){
+		if (phaseloop.size() && leavingActions[phaseloop[curPhase]].count(action) == 0) continue;
+		
 		int actionVar = actionVars[time][action];
         DEBUG(cout << "\t" << time << " " << action << " " << task.actions[action].get_name() << " = " << actionVar << endl);
 
@@ -2542,6 +2642,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 	// adding effects
 	for (size_t action = 0; action < task.actions.size(); action++){
+		if (phaseloop.size() && leavingActions[phaseloop[curPhase]].count(action) == 0) continue;
+		
 		int actionVar = actionVars[time][action];
         DEBUG(cout << "\t" << time << " " << action << " " << task.actions[action].get_name() << " = " << actionVar << endl);
 
@@ -2768,6 +2870,8 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	bef = get_number_of_clauses();
 	DEBUG(cout << "NULLARY" << endl);
 	for (size_t action = 0; action < task.actions.size(); action++){
+		if (phaseloop.size() && leavingActions[phaseloop[curPhase]].count(action) == 0) continue;
+		
 		int actionVar = actionVars[time][action];
 		if (generateBaseFormula){
 
@@ -3261,7 +3365,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = 15; i < limit+1; i++){
+		for (int i = limit; i < limit+1; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
 				clauseCount = 0;
