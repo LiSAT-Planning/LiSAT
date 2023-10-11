@@ -421,6 +421,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
     }
 	);
 
+
 	/////////////////////////// lookup table for the support from the initial state
 	supportingPredicateTuples.resize(task.predicates.size());
 	for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
@@ -432,7 +433,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			    auto rel = task.initial_state.get_relations()[i];
 			    auto tuple = task.initial_state.get_tuples_of_relation(i);
 				
-				if (predicate != rel.predicate_symbol) {
+				if (predicate != size_t(rel.predicate_symbol)) {
 					currentStartingPos += tuple.size();
 					continue;
 				}
@@ -447,7 +448,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			    auto rel = task.get_static_info().get_relations()[i];
 			    auto tuple = task.get_static_info().get_tuples_of_relation(i);
 				
-				if (predicate != rel.predicate_symbol) {
+				if (predicate != size_t(rel.predicate_symbol)) {
 					currentStartingPos += tuple.size();
 					continue;
 				}
@@ -459,8 +460,109 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 	}
 
 
-	/// stability and net change calculations
+	////////////////////////////////////////////// typing
 
+	map<int,set<int>> typeObjects;
+    for (size_t obj = 0; obj < task.objects.size(); obj++) {
+        auto oTypes = task.objects[obj].getTypes();
+        for (size_t i = 0; i < oTypes.size(); i++)
+			typeObjects[oTypes[i]].insert(obj);
+	}
+	map<set<int>,int> inverseTypes;
+	for (auto [a,b] : typeObjects)
+		inverseTypes[b] = a;
+
+	// first step, we need to have a look at the action arguments and whether they are actually any good ...
+
+	for (size_t action = 0; action < task.actions.size(); action++){
+		cout << "Action " << task.actions[action].get_name() << " typing" << endl; 
+		// initialise the possible argument values
+		vector<set<int>> possibleArgumentValues(task.actions[action].get_parameters().size());
+		for (size_t p = 0; p < possibleArgumentValues.size(); p++){
+			int type = task.actions[action].get_parameters()[p].type;
+			possibleArgumentValues[p] = typeObjects[type];
+			cout << "\tArgument " << p << " size: " << possibleArgumentValues[p].size() << endl;
+		}
+
+		const auto precs = task.actions[action].get_precondition();
+        for (size_t pre = 0; pre < precs.size(); pre++) {
+			int predicate = precs[pre].predicate_symbol;
+			if (!task.predicates[predicate].isStaticPredicate()) continue;
+			if (task.predicates[predicate].getArity() == 0) continue;
+			//cout << "Action " << task.actions[action].get_name() << " has static precondition on " << task.predicates[predicate].getName() << endl;
+
+			vector<set<int>> possibleValues (task.predicates[predicate].getArity());
+			for (auto tuple : supportingPredicateTuples[predicate]){
+				for (int i = 0; i < task.predicates[predicate].getArity(); i++)
+					possibleValues[i].insert(tuple.first[i]);
+			}
+			
+			for (int i = 0; i < task.predicates[predicate].getArity(); i++){
+				if (precs[pre].arguments[i].constant) continue; 
+				int argumentIndex = precs[pre].arguments[i].index;
+
+				set<int> intersect;
+				set_intersection(possibleArgumentValues[argumentIndex].begin(), possibleArgumentValues[argumentIndex].end(),
+								possibleValues[i].begin(), possibleValues[i].end(), std::inserter(intersect, intersect.begin()));
+
+				possibleArgumentValues[argumentIndex] = intersect;
+			}
+		}
+		cout << "===== After applying static preconditions " << endl;
+		for (size_t p = 0; p < possibleArgumentValues.size(); p++){
+			int originalType = task.actions[action].get_parameters()[p].type;
+			cout << "\tArgument " << p << " size: " << possibleArgumentValues[p].size() << endl;
+			
+			if (possibleArgumentValues[p].size() == 0) continue; 
+
+			int restrictedType;
+			if (inverseTypes.count(possibleArgumentValues[p]) != 0){
+				restrictedType = inverseTypes[possibleArgumentValues[p]];
+				if (restrictedType == originalType) continue;
+				cout << "\t\t" << color(COLOR_CYAN,"Found existing better type ") << task.type_names[restrictedType] << endl;
+			} else {
+				// we have to generate a new type ...
+				
+				// but we can currently handle only tree-shaped type structure so we can only generate the new type if:
+				// - for all other types it is either a subtype or has empty intersection
+				
+				bool acceptableNewType = true;
+				for (auto [elements,_typeID] : inverseTypes){
+					set<int> intersect;
+					set_intersection(possibleArgumentValues[p].begin(), possibleArgumentValues[p].end(),
+								elements.begin(), elements.end(), std::inserter(intersect, intersect.begin()));
+
+					if (intersect.size() == 0) continue;
+					if (intersect.size() == elements.size()) continue;
+					if (intersect.size() == possibleArgumentValues[p].size()) continue;
+
+					acceptableNewType = false;					
+				}
+
+				if (!acceptableNewType){
+					cout << "\t\t" << color(COLOR_RED,"Keeping old type as new one would not be acceptable") << endl;
+					continue;
+				}
+				
+				restrictedType = task.type_names.size();
+				const_cast<Task*>(&task)->type_names.push_back("newType_" + to_string(restrictedType));
+				inverseTypes[possibleArgumentValues[p]] = restrictedType;
+				cout << "\t\t" << color(COLOR_YELLOW,"Generated better type ") << task.type_names[restrictedType] << endl;
+
+				for (int obj : possibleArgumentValues[p]){
+					//DEBUG(cout << "\t\t\tObject " << task.objects[obj].getName() << " add " << restrictedType << endl);
+					const_cast<Task*>(&task)->objects[obj].getMutableTypes().push_back(restrictedType);
+					//for (int t : task.objects[obj].getTypes())
+					//	cout << "\t\t\t\t" << t << endl;
+				}
+			}
+			
+			*const_cast<int*>(&task.actions[action].get_parameters()[p].type) = restrictedType;
+		}
+
+	}
+
+	/// stability and net change calculations
 	int maximumNetChange = 0;
 	for (size_t action = 0; action < task.actions.size(); action++){
 		const auto effs = task.actions[action].get_effects();
@@ -526,7 +628,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 	cout << "Found Nullaries: " << allArityZeroPredicates.size() << " and Non-Nullaries: " << allArityNonZeroPredicates.size() << endl; 
 
 	vector<int> phasingStructure;
-	for (unsigned int s = 1; s < (1 << (allArityZeroPredicates.size())); s++){
+	for (int s = 1; s < (1 << (allArityZeroPredicates.size())); s++){
 		vector<int> thisList;
 		int initially = 0;
 		for (unsigned int i = 0; i < allArityZeroPredicates.size(); i++)
@@ -548,7 +650,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 			for (int i : thisList)
 				cout << " " << task.predicates[i].getName();
 			cout << endl);
-			for (unsigned int ss = 1; ss < (1 << (allArityNonZeroPredicates.size())); ss++){
+			for (int ss = 1; ss < (1 << (allArityNonZeroPredicates.size())); ss++){
 				if (__builtin_popcount(ss) >= 4) continue;
 				set<int> normalList;
 				int myinitially = initially;
@@ -646,7 +748,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 
 
 	// now try all subsets of the predicates 
-	for (unsigned int s = 1; s < (1 << (allArityNonZeroPredicates.size())); s++){
+	for (int s = 1; s < (1 << (allArityNonZeroPredicates.size())); s++){
 		if (__builtin_popcount(s) <= 2) continue;
 		if (__builtin_popcount(s) >= 4) continue;
 
@@ -681,7 +783,6 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 
 		bool occursInPre = false;
 		bool isMonotonePos = true;
-		bool isMonotoneNeg = true;
 		vector<int> achievers;
 
 		for (size_t action = 0; action < task.actions.size(); action++){
@@ -702,7 +803,6 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 				if (effObjec.negated)
 					isMonotonePos = false;
 				else{
-					isMonotoneNeg = false;
 					achievers.push_back(action); // if it makes multiple goals true -> can't handle that ...
 				}
 			}
@@ -1204,7 +1304,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
         cout << "}" << endl;
     }
 	);
-
+	//exit(0);
     cout << "- num actions " << numActions << endl;
     cout << "- num objects " << numObjs << endl;
     cout << "- max arity " << maxActionArity << endl;
@@ -1595,11 +1695,12 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 		
 					for(int o = 0; o < numObjs; o++){
 						if (o < thisLower || o > thisUpper){
-							if (o >= beforeLower && o <= beforeUpper)
+							if (o >= beforeLower && o <= beforeUpper){
 								if (isStable)
 									impliesNot(solver,equalsVar, stablePredicateArgumentSlotVariables[stateTime][predicate][slot][factParameter][o]); // different indexing ...
 								else
 									impliesNot(solver,equalsVar, argumentSlotVariables[stateTime][slot][factParameter][o-beforeLower]);
+							}
 						}
 						if (o < beforeLower || o > beforeUpper){
 							if (o >= thisLower && o <= thisUpper)
@@ -1780,7 +1881,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 					//cout << "A " << predicateVar << endl;
 					impliesOr(solver,predicateVar,possibleValues);
 				} else {
-					for (size_t lastPos = 0; lastPos < task.predicates[predicate].getArity() - 1 ; lastPos++){
+					for (size_t lastPos = 0; lastPos < size_t(task.predicates[predicate].getArity() - 1) ; lastPos++){
 						map<vector<int>,set<int>> possibleUpto;
 				
 						// build assignment tuple up to this point
@@ -1873,7 +1974,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 					DEBUG(capsule.registerVariable(objectVar, to_string(time) + " @ predicate " + task.predicates[predicate].getName() + " slot " + to_string(slot) + " argument#" + to_string(arg) + " = const " + task.objects[indexToObj[obj]].getName()));
 
 					if (time == 0){
-						if (supportingPredicateTuples[predicate].size() <= slot) // this takes care of the maxStable predicates
+						if (int(supportingPredicateTuples[predicate].size()) <= slot) // this takes care of the maxStable predicates
 							assertNot(solver,objectVar);
 						else if (obj == objToIndex[supportingPredicateTuples[predicate][slot].first[arg]])
 							assertYes(solver,objectVar);
@@ -2102,9 +2203,9 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				DEBUG(capsule.registerVariable(objectVar, to_string(time) + " @ param#" + to_string(parameter) + " = const " + task.objects[indexToObj[o + lower]].getName()));
 			}
 			// each parameter can have at most one value
-			int x = get_number_of_clauses();
+			//int x = get_number_of_clauses();
 			atMostOne(solver,capsule,parameterVarsTime[parameter]);
-			DEBUG(cout << "Generated for parameter " << parameter << " objects " << upper - lower + 1 << " clauses " << get_number_of_clauses() - x << endl); 
+			//DEBUG(cout << "Generated for parameter " << parameter << " objects " << upper - lower + 1 << " clauses " << get_number_of_clauses() - x << endl); 
 		}
 		parameterVars.push_back(parameterVarsTime);
 
@@ -2123,7 +2224,6 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 		if (generateBaseFormula){
           	for (size_t l = 0; l < params.size(); l++) {
 				int thisParameterIndex = actionArgumentPositions[action][l];
-          	    DEBUG(cout << "\t\t" << task.type_names[params[l].type] << ": ");
           	    //if (!needToType[{action,l}]){
           	    //	DEBUG(cout << "no need to type " << endl);
 				//	continue;
@@ -2131,6 +2231,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				
 				int lower = lowerTindex[params[l].type];
           	    int upper = upperTindex[params[l].type];
+          	    DEBUG(cout << "\t\t" << task.type_names[params[l].type] << "(" << lower << "-" << upper << "): ");
           	    DEBUG(for (int m = lower; m <= upper; m++) {
           	        cout << task.objects[indexToObj[m]].getName() << " ";
           	    }
@@ -2151,7 +2252,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 					int parameterConstantVar = parameterVars[time][thisParameterIndex][i];
 					allowed.push_back(parameterConstantVar);
 				}
-				DEBUG(cout << "Typing " << actionVar << ":"; for(auto x : allowed) cout << " " << x; cout << endl;);
+				//DEBUG(cout << "Typing " << actionVar << ":"; for(auto x : allowed) cout << " " << x; cout << endl;);
 				impliesOr(solver,actionVar,allowed);
           	}
 		}
@@ -2287,7 +2388,6 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				// consider how many arguments are there
 				if (task.predicates[predicate].getArity() == 1){
 					vector<int> possibleValues;
-					
 					DEBUG(cout << "YY " << capsule.variableNames[actionVar]);
 					for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
 						vector<int> tuple = supportingPredicateTuples[predicate][i].first;
@@ -2311,7 +2411,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 					
 					impliesOr(solver, actionVar, possibleValues); 
 				} else {
-					for (size_t lastPos = 0; lastPos < task.predicates[predicate].getArity() - 1 ; lastPos++){
+					for (size_t lastPos = 0; lastPos < size_t(task.predicates[predicate].getArity() - 1) ; lastPos++){
 						map<vector<int>,set<int>> possibleUpto;
 				
 						// build assignment tuple up to this point
@@ -2323,7 +2423,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 							bool impossible = false;
 							int nextConstantVar = -1;
 						
-							for (size_t j = 0; j <= lastPos+1; j++){
+							for (size_t j = 0; !impossible && j <= lastPos+1; j++){
 								// push only the non-constants
 								int preconditionVar = precObjec.arguments[j].index;
 								
@@ -2335,6 +2435,10 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 									int myObjIndex = objToIndex[tuple[j]];
 									int argPos = actionArgumentPositions[action][preconditionVar];
 									int lower = lowerTindex[typeOfArgument[argPos]];
+									int upper = upperTindex[typeOfArgument[argPos]];
+									
+									if (myObjIndex < lower || myObjIndex > upper) { impossible = true; continue; } 
+								
 									int constantVar = parameterVarsTime[argPos][myObjIndex - lower];
 									if (j == lastPos+1)
 										nextConstantVar = constantVar;
@@ -2346,7 +2450,6 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 							if (!impossible) possibleUpto[subTuple].insert(nextConstantVar);
 						}
 				
-				
 						for (auto & x : possibleUpto){
 							andImpliesOr(solver,x.first,x.second);
 							DEBUG(for (int i : x.first) {
@@ -2355,6 +2458,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 							for (int i : x.second) cout << " [" << capsule.variableNames[i] << "]";
 							cout << endl);
 						}
+						
 				
 						if (lastPos == 0){
 							int posOfValue = 1;
@@ -2559,7 +2663,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 						for (size_t p = 0; p < task.predicates.size(); p++){
 							int pVar = predicateSlotVariables[time+1][slot][p];
 							if (pVar == -1) continue; // static or = or type@
-							if (p == predicate)
+							if (p == size_t(predicate))
 								andImplies(solver, actionVar, effSlotVar, pVar);
 							else 
 								andImpliesNot(solver, actionVar, effSlotVar, pVar);
@@ -2993,7 +3097,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 	//	exit(-42);
 	//}
 
-	bool satisficing = !optimal;
+	//bool satisficing = !optimal;
 
 	//if (satisficing){
 	//	DEBUG(cout << "Parameter arity " << maxActionArity << " Objects " << task.objects.size() << endl);
@@ -3157,7 +3261,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			planLength = 0;
 		}
 		
-		for (int i = 0; i < limit+1; i++){
+		for (int i = 15; i < limit+1; i++){
 			if (!incremental) {// create a new solver instance for every ACD
 				solver = ipasir_init();
 				clauseCount = 0;

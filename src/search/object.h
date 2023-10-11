@@ -15,6 +15,8 @@ public:
   int getIndex() const { return index; }
 
   const std::vector<int> &getTypes() const { return types; }
+  
+  std::vector<int> &getMutableTypes() { return types; }
 
 private:
   std::string name;

@@ -56,6 +56,10 @@ public:
         return parameters;
     }
 
+	std::vector<Parameter> &get_mutable_parameters() {
+        return parameters;
+    }
+
     const std::vector<Atom> &get_precondition() const {
         return precondition;
     }
