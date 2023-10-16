@@ -2514,7 +2514,9 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 					
 					impliesOr(solver, actionVar, possibleValues); 
 				} else {
+					DEBUG(cout << "Static Precondition on " << task.predicates[predicate].getName() << endl);
 					for (size_t lastPos = 0; lastPos < size_t(task.predicates[predicate].getArity() - 1) ; lastPos++){
+						DEBUG(cout << "Generating Static Layer " << lastPos << endl);
 						map<vector<int>,set<int>> possibleUpto;
 				
 						// build assignment tuple up to this point
@@ -2551,13 +2553,15 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 							}
 							
 							if (!impossible) possibleUpto[subTuple].insert(nextConstantVar);
-							else possibleUpto[subTuple].size(); // ensure that the map entry is there
 						}
-				
+			
+						if (possibleUpto.size() == 0)
+							assertNot(solver, actionVar); // this action is statically impossible
+						
 						for (auto & x : possibleUpto){
 							andImpliesOr(solver,x.first,x.second);
 							DEBUG(for (int i : x.first) {
-									cout << " - [" << i << capsule.variableNames[i] << "]";
+									cout << " - [" << i << " " << capsule.variableNames[i] << "]";
 							}
 							for (int i : x.second) cout << " [" << capsule.variableNames[i] << "]";
 							cout << endl);
@@ -2570,6 +2574,10 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 							for (auto & x : possibleUpto)
 								initial.push_back(x.first[posOfValue]);
 							
+							DEBUG(cout << "Initial values:";
+							for (int i : initial) cout << " [" << i << " " << capsule.variableNames[i] << "]";
+							cout << endl;
+									);
 							impliesOr(solver,actionVar,initial);
 						}
 					}
