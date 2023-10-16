@@ -18,6 +18,7 @@ class Options {
 	int planLength;
 	int width;
 	int timelimit;
+	bool structure;
 	bool optimal;
 	bool incremental;
 
@@ -37,6 +38,7 @@ public:
             ("width,w", po::value<int>()->default_value(10), "Number of predicate slots in linear encoding")
             ("timelimit,t", po::value<int>()->default_value(30*60), "Time limit for SAT planner in seconds")
             ("optimal,o", "Run the SAT planner in optimal mode")
+            ("noStructure,S", "Run SAT linear without structure inference")
             ("incremental,i", "Run the SAT planner in incremenal mode. ATTENTION: this is not supported by all SAT solvers")
             ;
 
@@ -67,6 +69,7 @@ public:
         width = vm["width"].as<int>();
        	timelimit = vm["timelimit"].as<int>();
         optimal = vm.count("optimal");
+        structure = !vm.count("noStructure");
         incremental = vm.count("incremental");
     }
 
@@ -108,6 +111,10 @@ public:
 
 	int get_timelimit() const {
         return timelimit;
+    }
+
+    unsigned int get_structure() const {
+        return structure;
     }
 
     unsigned int get_optimal() const {

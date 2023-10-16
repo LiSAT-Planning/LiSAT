@@ -39,6 +39,7 @@ def parse_options():
     parser.add_argument('-l', '--planLength', action='store', help='Plan length for the SAT encoding', default=10000)
     parser.add_argument('-w', '--width', action='store', help='Number of predicate slots', default=10000)
     parser.add_argument('-o', '--optimal', action="store_true", help="Run the SAT planner in optimal mode")
+    parser.add_argument('-S', '--noStructure', action="store_true", help="disable structure inference for linear SAT planner")
     parser.add_argument('-t', '--timelimit', action="store", help="Time limit for the SAT splanner in seconds", default=60*30) # default is 30 minutes
     parser.add_argument('-I', '--incremental', action="store_true", help="Run the SAT planner in incremental mode\nATTENTION: this is not supported by all SAT solvers.")
     parser.add_argument('--translator-output-file', dest='translator_file',
@@ -168,6 +169,8 @@ def main():
                '-w', str(options.width),
                '-t', str(options.timelimit),
                '--seed', str(options.seed)]
+        if options.noStructure:
+            cmd.append('-S')
         if options.optimal:
             cmd.append('-o')
         if options.incremental:

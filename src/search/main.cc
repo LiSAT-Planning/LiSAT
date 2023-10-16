@@ -68,7 +68,7 @@ int main(int argc, char *argv[]) {
 #endif
 	} else if (opt.get_search_engine() == "linear"){
 #ifndef CMAKE_NO_SAT
-        std::unique_ptr<LiftedLinearSAT> liftedSAT(new LiftedLinearSAT(task));
+        std::unique_ptr<LiftedLinearSAT> liftedSAT(new LiftedLinearSAT(task,opt.get_structure()));
     	try {
     	    auto exitcode = liftedSAT->solve(task,opt.get_planLength(), opt.get_optimal(), opt.get_incremental(), opt.get_width(), opt.get_timelimit());
     	    utils::report_exit_code_reentrant(exitcode);

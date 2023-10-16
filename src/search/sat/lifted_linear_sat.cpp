@@ -400,7 +400,7 @@ map<int,set<int>> leavingActions;
 vector<int> phaseloop;
 
 
-LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
+LiftedLinearSAT::LiftedLinearSAT(const Task & task, bool inferStructure) {
 	DEBUG(
     cout << endl << "Initial state (static):" << endl;
     for (tSize i = 0; i < task.get_static_info().get_relations().size(); i++) {
@@ -611,487 +611,497 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task) {
 	DEBUG(cout << "maximumNetChange = " << maximumNetChange << endl);
 
 
-	map<int,int> stablePredicates;
-	map<int,int> maxStablePredicates;
+	foundOrdinaryPredicate = false;
+	set<int> ordinaryPredicates;
+	if (inferStructure){
+		map<int,int> stablePredicates;
+		map<int,int> maxStablePredicates;
 
-	for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
-		if (task.predicates[pIndex].getArity() == 0) continue;
-		if (task.predicates[pIndex].isStaticPredicate()) continue; // static predicates get special treatment
-		int netChange = calculateOverallBalanceOfPredicate(task, pIndex);
-		int inInit = predicateInInit(task, pIndex);
-
-		if (netChange == 0){
-			cout << color(COLOR_GREEN, "Found stable predicate ") << task.predicates[pIndex].getName() << endl;
-			stablePredicates[pIndex] = inInit;
-		}
-	}
-
-	vector<int> allArityZeroPredicates;
-	vector<int> allArityNonZeroPredicates;
-	for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++){
-		if (task.predicates[pIndex].isStaticPredicate()) continue; // static predicates get special treatment
-		if (task.predicates[pIndex].getArity() == 0) allArityZeroPredicates.push_back(pIndex);
-		else allArityNonZeroPredicates.push_back(pIndex);
-	}
-	cout << "Found Nullaries: " << allArityZeroPredicates.size() << " and Non-Nullaries: " << allArityNonZeroPredicates.size() << endl; 
-
-	vector<int> phasingStructure;
-	for (int s = 1; s < (1 << (allArityZeroPredicates.size())); s++){
-		vector<int> thisList;
-		int initially = 0;
-		for (unsigned int i = 0; i < allArityZeroPredicates.size(); i++)
-			if (s & (1 << i)) {
-				thisList.push_back(allArityZeroPredicates[i]);
-				initially += task.initial_state.get_nullary_atoms()[allArityZeroPredicates[i]];
-			}
-
-		if (initially != 1) continue;
-
-		int netChange = calculateOverallBalanceOfNullary(task,thisList);
-
-		if (netChange == 0){
-			if (thisList.size() > phasingStructure.size()){
-				phasingStructure = thisList;
-			}
-		} else {
-			DEBUG(cout << "Testing ...";
-			for (int i : thisList)
-				cout << " " << task.predicates[i].getName();
-			cout << endl);
-			for (int ss = 1; ss < (1 << (allArityNonZeroPredicates.size())); ss++){
-				if (__builtin_popcount(ss) >= 4) continue;
-				set<int> normalList;
-				int myinitially = initially;
-				for (unsigned int i = 0; i < allArityNonZeroPredicates.size(); i++)
-					if (ss & (1 << i)) {
-						normalList.insert(allArityNonZeroPredicates[i]);
-						myinitially += predicateInInit(task,allArityNonZeroPredicates[i]);
-					}
-				if (myinitially != 1) continue;
-				
-				int netChange = calculateOverallBalanceOfNullaryAndNormal(task,thisList, normalList);
-
-				if (netChange == 0){
-					if (thisList.size() + normalList.size() > phasingStructure.size()){
-						phasingStructure = thisList;
-						for (int x : normalList) phasingStructure.push_back(x);
-					}
-				}
-			}
-		}
-	}
-
-	if (phasingStructure.size() > 0){
-		cout << color(COLOR_YELLOW, "Found Plan Phasing Structure:");
-		for (int i : phasingStructure)
-			cout << " " << task.predicates[i].getName();
-		cout << endl;
-
-
-		// this might be an "absolute" phasing structure, i.e., a case in which every action leaves a phase ..
-		map<int,int> enteringActions;
-		for (size_t action = 0; action < task.actions.size(); action++){
-			const auto effs = task.actions[action].get_effects();
-			const auto precs = task.actions[action].get_precondition();
-				
-			int leavingPhase = -1;
-			int enteringPhase = -1;
-			// check whether we leaving a phase
-			for (int phasingPredicate : phasingStructure){
-				int thisChange;
-				if (task.predicates[phasingPredicate].getArity() == 0)
-					thisChange = calculateNullaryEffectBalance(task, action, phasingPredicate);
-				else{
-					set<int> __singleton; __singleton.insert(phasingPredicate);
-					thisChange = calculateOverallBalanceOfAction(task,action,__singleton);
-				}
-				if (thisChange == -1)
-					leavingPhase = phasingPredicate;
-				else if (thisChange == 1)
-					enteringPhase = phasingPredicate;
-			}
-			leavingActions[leavingPhase].insert(action);
-			enteringActions[action] = enteringPhase;
-		}
-
-		for (auto [phase, actions] : leavingActions){
-			if (phase != -1)
-				cout << "Phase " << task.predicates[phase].getName() << ":"; 
-			else
-				cout << "No Phase:";
-			for (int action : actions)
-				cout << " " << task.actions[action].get_name();
-			cout << endl;
-		}
-
-		if (leavingActions.count(-1) == 0){
-			// determine the initial phase
-			int initialPhase = -1;
-			for (int phasingPredicate : phasingStructure){
-				if (task.predicates[phasingPredicate].getArity() == 0){
-					if (task.initial_state.get_nullary_atoms()[phasingPredicate])
-						initialPhase = phasingPredicate;
-				} else {
-					if (predicateInInit(task,phasingPredicate))
-						initialPhase = phasingPredicate;
-				}
-			}
-
-			int curPhase = initialPhase;
-			while (curPhase != initialPhase || phaseloop.size() == 0){
-				phaseloop.push_back(curPhase);
-				int nextPhase = -1;
-				bool bad = false;
-				for (int leaving : leavingActions[curPhase]){
-					if (nextPhase == -1)
-						nextPhase = enteringActions[leaving];
-					else if (nextPhase != enteringActions[leaving])
-						bad = true;
-				}
-				if (bad){
-					phaseloop.clear();
-					break;
-				}
-
-				curPhase = nextPhase;
-			}
-
-			if (phaseloop.size()){
-				cout << "Phasing Loop:";
-				for (int phase : phaseloop) cout << " " << task.predicates[phase].getName();
-				cout << endl;
-			}
-
-			//phaseloop.clear();
-		}
-	}
-
-	// if there is a phasing structure we might use it to get more maxima 	
-	if (phasingStructure.size())
 		for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
 			if (task.predicates[pIndex].getArity() == 0) continue;
 			if (task.predicates[pIndex].isStaticPredicate()) continue; // static predicates get special treatment
-			
-			int netChange = calculateOverallBalanceOfPredicateInPhasing(task,pIndex,phasingStructure);
+			int netChange = calculateOverallBalanceOfPredicate(task, pIndex);
+			int inInit = predicateInInit(task, pIndex);
+
 			if (netChange == 0){
-				cout << task.predicates[pIndex].getName() << color(COLOR_RED, " Net Phasing: ") << netChange << endl;
-				maxStablePredicates[pIndex] = predicateInInit(task,pIndex) + 1; // +1 for the potential net change
+				cout << color(COLOR_GREEN, "Found stable predicate ") << task.predicates[pIndex].getName() << endl;
+				stablePredicates[pIndex] = inInit;
 			}
 		}
 
-	//exit(0);
+		vector<int> allArityZeroPredicates;
+		vector<int> allArityNonZeroPredicates;
+		for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++){
+			if (task.predicates[pIndex].isStaticPredicate()) continue; // static predicates get special treatment
+			if (task.predicates[pIndex].getArity() == 0) allArityZeroPredicates.push_back(pIndex);
+			else allArityNonZeroPredicates.push_back(pIndex);
+		}
+		cout << "Found Nullaries: " << allArityZeroPredicates.size() << " and Non-Nullaries: " << allArityNonZeroPredicates.size() << endl; 
 
+		vector<int> phasingStructure;
+		for (int s = 1; s < (1 << (allArityZeroPredicates.size())); s++){
+			vector<int> thisList;
+			int initially = 0;
+			for (unsigned int i = 0; i < allArityZeroPredicates.size(); i++)
+				if (s & (1 << i)) {
+					thisList.push_back(allArityZeroPredicates[i]);
+					initially += task.initial_state.get_nullary_atoms()[allArityZeroPredicates[i]];
+				}
 
-	//for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
-	//	if (task.predicates[pIndex].getArity() == 0) continue;
-	//	if (task.predicates[pIndex].isStaticPredicate()) continue; // static predicates get special treatment
-	//	for (unsigned int s = 1; s < (1 << (allArityZeroPredicates.size())); s++){
-	//		vector<int> thisList;
-	//		for (unsigned int i = 0; i < allArityZeroPredicates.size(); i++)
-	//			if (s & (1 << i)) thisList.push_back(allArityZeroPredicates[i]);
+			if (initially != 1) continue;
 
-	//		int netChange = calculateOverallBalanceOfPredicateAndNullary(task,pIndex,allArityZeroPredicates);
-	//		if (netChange == 0)
-	//			cout << task.predicates[pIndex].getName() << color(COLOR_RED, " Net Change: ") << netChange;
-	//		else
-	//			cout << task.predicates[pIndex].getName() << " Net Change: " << netChange;
-	//		for (int i : thisList)
-	//			cout << " " << task.predicates[i].getName();
-	//		cout << endl;
-	//	}
-	//}
-
-
-
-
-	////////////////////////////////////////////////////////////////////////////////////////
-	for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
-		if (task.predicates[pIndex].getArity() == 0) continue;
-		if (task.predicates[pIndex].isStaticPredicate()) continue; // static predicates get special treatment
-		for (int pIndex2 = pIndex+1; pIndex2 < int(task.predicates.size()); pIndex2++) {
-			if (task.predicates[pIndex2].getArity() == 0) continue;
-			if (task.predicates[pIndex2].isStaticPredicate()) continue; // static predicates get special treatment
-			
-			int netChange = calculateOverallBalanceOfPredicatePair(task, pIndex, pIndex2);
-			int inInit = predicatePairInInit(task, pIndex, pIndex2);
+			int netChange = calculateOverallBalanceOfNullary(task,thisList);
 
 			if (netChange == 0){
-				cout << color(COLOR_GREEN, "Found stable predicate pair ") << task.predicates[pIndex].getName() << " & " << task.predicates[pIndex2].getName() << endl;
-				if (task.predicates[pIndex].getArity() != 0) {
-					if (maxStablePredicates.count(pIndex))
-						maxStablePredicates[pIndex] = min(inInit, maxStablePredicates[pIndex]);
-					else
-						maxStablePredicates[pIndex] = inInit;
+				if (thisList.size() > phasingStructure.size()){
+					phasingStructure = thisList;
 				}
-				if (task.predicates[pIndex2].getArity() != 0) {
-					if (maxStablePredicates.count(pIndex2))
-						maxStablePredicates[pIndex2] = min(inInit, maxStablePredicates[pIndex2]);
-					else
-						maxStablePredicates[pIndex2] = inInit;
+			} else {
+				DEBUG(cout << "Testing ...";
+				for (int i : thisList)
+					cout << " " << task.predicates[i].getName();
+				cout << endl);
+				for (int ss = 1; ss < (1 << (allArityNonZeroPredicates.size())); ss++){
+					if (__builtin_popcount(ss) >= 4) continue;
+					set<int> normalList;
+					int myinitially = initially;
+					for (unsigned int i = 0; i < allArityNonZeroPredicates.size(); i++)
+						if (ss & (1 << i)) {
+							normalList.insert(allArityNonZeroPredicates[i]);
+							myinitially += predicateInInit(task,allArityNonZeroPredicates[i]);
+						}
+					if (myinitially != 1) continue;
+					
+					int netChange = calculateOverallBalanceOfNullaryAndNormal(task,thisList, normalList);
+
+					if (netChange == 0){
+						if (thisList.size() + normalList.size() > phasingStructure.size()){
+							phasingStructure = thisList;
+							for (int x : normalList) phasingStructure.push_back(x);
+						}
+					}
 				}
 			}
 		}
-	}
 
-
-
-	// now try all subsets of the predicates 
-	for (int s = 1; s < (1 << (allArityNonZeroPredicates.size())); s++){
-		if (__builtin_popcount(s) <= 2) continue;
-		if (__builtin_popcount(s) >= 4) continue;
-
-		set<int> thisList;
-		int initially = 0;
-		for (unsigned int i = 0; i < allArityNonZeroPredicates.size(); i++)
-			if (s & (1 << i)) {
-				thisList.insert(allArityNonZeroPredicates[i]);
-				initially += predicateInInit(task,allArityNonZeroPredicates[i]);
-			}
-		if (calculateOverallBalanceOfPredicateSet(task,thisList) == 0){
-			cout << color(COLOR_GREEN, "Found stable predicate set ") << "of init size " << initially ;
-			for (int p : thisList) cout << " " << task.predicates[p].getName();
+		if (phasingStructure.size() > 0){
+			cout << color(COLOR_YELLOW, "Found Plan Phasing Structure:");
+			for (int i : phasingStructure)
+				cout << " " << task.predicates[i].getName();
 			cout << endl;
-			for (int pIndex : thisList)
-				if (maxStablePredicates.count(pIndex))
-					maxStablePredicates[pIndex] = min(initially, maxStablePredicates[pIndex]);
-				else
-					maxStablePredicates[pIndex] = initially;
-		}
-	}
 
 
-	/////////////////////////////////////////////////
-	// look for predicates that only occur in effects (and thus only in the goal)
-	// also look for monotone predicates
-	map<int, pair<int,int>> goalAchieverActionsWithoutSideEffects; // pair: action and effect index
-	for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
-		auto p = task.predicates[pIndex];
-		if (p.isStaticPredicate()) continue; // static predicates get special treatment
-		if (p.getArity() == 0) continue; // static predicates get special treatment
-
-		bool occursInPre = false;
-		bool isMonotonePos = true;
-		vector<int> achievers;
-
-		for (size_t action = 0; action < task.actions.size(); action++){
-			const auto effs = task.actions[action].get_effects();
-			const auto precs = task.actions[action].get_precondition();
-	    
-			for (size_t prec = 0; prec < precs.size(); prec++) {
-				const auto & precObjec = precs[prec];
-				int prePredicate = precObjec.predicate_symbol;
-				if (prePredicate != pIndex) continue;
-				occursInPre = true;
-			}
-
-    	    for (size_t eff = 0; eff < effs.size(); eff++) {
-				const auto & effObjec = effs[eff];
-				int predicate = effObjec.predicate_symbol;
-				if (predicate != pIndex) continue;
-				if (effObjec.negated)
-					isMonotonePos = false;
-				else{
-					achievers.push_back(action); // if it makes multiple goals true -> can't handle that ...
-				}
-			}
-		}
-
-		// TODO technically the monotonicity is nice to have, but not really necessary as we can just track all facts that are true in the goal individually
-		if (!occursInPre && isMonotonePos){
-			// we need to track the tuples of this predicate that are in the goal
-			for (size_t goal = 0; goal < task.goal.goal.size(); goal++) {
-				const auto & goalObjec = task.goal.goal[goal];
-				int predicate = goalObjec.predicate;
-				if (predicate != pIndex) {
-					continue;		
-				}
-				
-				vector<int> tup;
-				// iterate over the arguments of the precondition
-				for (size_t iArg = 0; iArg < goalObjec.args.size(); iArg++){
-					int preconditionVar = goalObjec.args[iArg];
-					tup.push_back(preconditionVar);
-				}
-				predicateNoPreMonotone[pIndex].insert(tup);
-			}
-
-
-			// there might be just one achiever for such predicate	
-			if (achievers.size() == 1){
-				int action = achievers[0];
-				DEBUG(cout << "Only one achiever action: " << task.actions[action].get_name() << endl);
-				// check if this an "only achiever" action
+			// this might be an "absolute" phasing structure, i.e., a case in which every action leaves a phase ..
+			map<int,int> enteringActions;
+			for (size_t action = 0; action < task.actions.size(); action++){
 				const auto effs = task.actions[action].get_effects();
 				const auto precs = task.actions[action].get_precondition();
-				bool hasSideEffect = false;
-				int effectIndex = -1;
-        		for (size_t eff = 0; eff < effs.size(); eff++) {
+					
+				int leavingPhase = -1;
+				int enteringPhase = -1;
+				// check whether we leaving a phase
+				for (int phasingPredicate : phasingStructure){
+					int thisChange;
+					if (task.predicates[phasingPredicate].getArity() == 0)
+						thisChange = calculateNullaryEffectBalance(task, action, phasingPredicate);
+					else{
+						set<int> __singleton; __singleton.insert(phasingPredicate);
+						thisChange = calculateOverallBalanceOfAction(task,action,__singleton);
+					}
+					if (thisChange == -1)
+						leavingPhase = phasingPredicate;
+					else if (thisChange == 1)
+						enteringPhase = phasingPredicate;
+				}
+				leavingActions[leavingPhase].insert(action);
+				enteringActions[action] = enteringPhase;
+			}
+
+			for (auto [phase, actions] : leavingActions){
+				if (phase != -1)
+					cout << "Phase " << task.predicates[phase].getName() << ":"; 
+				else
+					cout << "No Phase:";
+				for (int action : actions)
+					cout << " " << task.actions[action].get_name();
+				cout << endl;
+			}
+
+			if (leavingActions.count(-1) == 0){
+				// determine the initial phase
+				int initialPhase = -1;
+				for (int phasingPredicate : phasingStructure){
+					if (task.predicates[phasingPredicate].getArity() == 0){
+						if (task.initial_state.get_nullary_atoms()[phasingPredicate])
+							initialPhase = phasingPredicate;
+					} else {
+						if (predicateInInit(task,phasingPredicate))
+							initialPhase = phasingPredicate;
+					}
+				}
+
+				int curPhase = initialPhase;
+				while (curPhase != initialPhase || phaseloop.size() == 0){
+					phaseloop.push_back(curPhase);
+					int nextPhase = -1;
+					bool bad = false;
+					for (int leaving : leavingActions[curPhase]){
+						if (nextPhase == -1)
+							nextPhase = enteringActions[leaving];
+						else if (nextPhase != enteringActions[leaving])
+							bad = true;
+					}
+					if (bad){
+						phaseloop.clear();
+						break;
+					}
+
+					curPhase = nextPhase;
+				}
+
+				if (phaseloop.size()){
+					cout << "Phasing Loop:";
+					for (int phase : phaseloop) cout << " " << task.predicates[phase].getName();
+					cout << endl;
+				}
+
+				//phaseloop.clear();
+			}
+		}
+
+		// if there is a phasing structure we might use it to get more maxima 	
+		if (phasingStructure.size())
+			for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
+				if (task.predicates[pIndex].getArity() == 0) continue;
+				if (task.predicates[pIndex].isStaticPredicate()) continue; // static predicates get special treatment
+				
+				int netChange = calculateOverallBalanceOfPredicateInPhasing(task,pIndex,phasingStructure);
+				if (netChange == 0){
+					cout << task.predicates[pIndex].getName() << color(COLOR_RED, " Net Phasing: ") << netChange << endl;
+					maxStablePredicates[pIndex] = predicateInInit(task,pIndex) + 1; // +1 for the potential net change
+				}
+			}
+
+		//exit(0);
+
+
+		//for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
+		//	if (task.predicates[pIndex].getArity() == 0) continue;
+		//	if (task.predicates[pIndex].isStaticPredicate()) continue; // static predicates get special treatment
+		//	for (unsigned int s = 1; s < (1 << (allArityZeroPredicates.size())); s++){
+		//		vector<int> thisList;
+		//		for (unsigned int i = 0; i < allArityZeroPredicates.size(); i++)
+		//			if (s & (1 << i)) thisList.push_back(allArityZeroPredicates[i]);
+
+		//		int netChange = calculateOverallBalanceOfPredicateAndNullary(task,pIndex,allArityZeroPredicates);
+		//		if (netChange == 0)
+		//			cout << task.predicates[pIndex].getName() << color(COLOR_RED, " Net Change: ") << netChange;
+		//		else
+		//			cout << task.predicates[pIndex].getName() << " Net Change: " << netChange;
+		//		for (int i : thisList)
+		//			cout << " " << task.predicates[i].getName();
+		//		cout << endl;
+		//	}
+		//}
+
+
+
+
+		////////////////////////////////////////////////////////////////////////////////////////
+		for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
+			if (task.predicates[pIndex].getArity() == 0) continue;
+			if (task.predicates[pIndex].isStaticPredicate()) continue; // static predicates get special treatment
+			for (int pIndex2 = pIndex+1; pIndex2 < int(task.predicates.size()); pIndex2++) {
+				if (task.predicates[pIndex2].getArity() == 0) continue;
+				if (task.predicates[pIndex2].isStaticPredicate()) continue; // static predicates get special treatment
+				
+				int netChange = calculateOverallBalanceOfPredicatePair(task, pIndex, pIndex2);
+				int inInit = predicatePairInInit(task, pIndex, pIndex2);
+
+				if (netChange == 0){
+					cout << color(COLOR_GREEN, "Found stable predicate pair ") << task.predicates[pIndex].getName() << " & " << task.predicates[pIndex2].getName() << endl;
+					if (task.predicates[pIndex].getArity() != 0) {
+						if (maxStablePredicates.count(pIndex))
+							maxStablePredicates[pIndex] = min(inInit, maxStablePredicates[pIndex]);
+						else
+							maxStablePredicates[pIndex] = inInit;
+					}
+					if (task.predicates[pIndex2].getArity() != 0) {
+						if (maxStablePredicates.count(pIndex2))
+							maxStablePredicates[pIndex2] = min(inInit, maxStablePredicates[pIndex2]);
+						else
+							maxStablePredicates[pIndex2] = inInit;
+					}
+				}
+			}
+		}
+
+
+
+		// now try all subsets of the predicates 
+		for (int s = 1; s < (1 << (allArityNonZeroPredicates.size())); s++){
+			if (__builtin_popcount(s) <= 2) continue;
+			if (__builtin_popcount(s) >= 4) continue;
+
+			set<int> thisList;
+			int initially = 0;
+			for (unsigned int i = 0; i < allArityNonZeroPredicates.size(); i++)
+				if (s & (1 << i)) {
+					thisList.insert(allArityNonZeroPredicates[i]);
+					initially += predicateInInit(task,allArityNonZeroPredicates[i]);
+				}
+			if (calculateOverallBalanceOfPredicateSet(task,thisList) == 0){
+				cout << color(COLOR_GREEN, "Found stable predicate set ") << "of init size " << initially ;
+				for (int p : thisList) cout << " " << task.predicates[p].getName();
+				cout << endl;
+				for (int pIndex : thisList)
+					if (maxStablePredicates.count(pIndex))
+						maxStablePredicates[pIndex] = min(initially, maxStablePredicates[pIndex]);
+					else
+						maxStablePredicates[pIndex] = initially;
+			}
+		}
+
+
+		/////////////////////////////////////////////////
+		// look for predicates that only occur in effects (and thus only in the goal)
+		// also look for monotone predicates
+		map<int, pair<int,int>> goalAchieverActionsWithoutSideEffects; // pair: action and effect index
+		for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
+			auto p = task.predicates[pIndex];
+			if (p.isStaticPredicate()) continue; // static predicates get special treatment
+			if (p.getArity() == 0) continue; // static predicates get special treatment
+
+			bool occursInPre = false;
+			bool isMonotonePos = true;
+			vector<int> achievers;
+
+			for (size_t action = 0; action < task.actions.size(); action++){
+				const auto effs = task.actions[action].get_effects();
+				const auto precs = task.actions[action].get_precondition();
+		    
+				for (size_t prec = 0; prec < precs.size(); prec++) {
+					const auto & precObjec = precs[prec];
+					int prePredicate = precObjec.predicate_symbol;
+					if (prePredicate != pIndex) continue;
+					occursInPre = true;
+				}
+
+    		    for (size_t eff = 0; eff < effs.size(); eff++) {
 					const auto & effObjec = effs[eff];
 					int predicate = effObjec.predicate_symbol;
-					if (predicate == pIndex) { effectIndex = eff; continue;} // this one might increase
+					if (predicate != pIndex) continue;
+					if (effObjec.negated)
+						isMonotonePos = false;
+					else{
+						achievers.push_back(action); // if it makes multiple goals true -> can't handle that ...
+					}
+				}
+			}
 
-					int thisChange = calculateEffectBalance(task,task.actions[action],effObjec, true); // be conservative on effects
-
-					if (thisChange != 0) hasSideEffect = true;
+			// TODO technically the monotonicity is nice to have, but not really necessary as we can just track all facts that are true in the goal individually
+			if (!occursInPre && isMonotonePos){
+				// we need to track the tuples of this predicate that are in the goal
+				for (size_t goal = 0; goal < task.goal.goal.size(); goal++) {
+					const auto & goalObjec = task.goal.goal[goal];
+					int predicate = goalObjec.predicate;
+					if (predicate != pIndex) {
+						continue;		
+					}
+					
+					vector<int> tup;
+					// iterate over the arguments of the precondition
+					for (size_t iArg = 0; iArg < goalObjec.args.size(); iArg++){
+						int preconditionVar = goalObjec.args[iArg];
+						tup.push_back(preconditionVar);
+					}
+					predicateNoPreMonotone[pIndex].insert(tup);
 				}
 
-				if (!hasSideEffect){
-					DEBUG(cout << "Only achiever has no side effects. So its preconditions are only relevant if connected to the goal." << endl);
-					goalAchieverActionsWithoutSideEffects[action] = {action, effectIndex};	
+
+				// there might be just one achiever for such predicate	
+				if (achievers.size() == 1){
+					int action = achievers[0];
+					DEBUG(cout << "Only one achiever action: " << task.actions[action].get_name() << endl);
+					// check if this an "only achiever" action
+					const auto effs = task.actions[action].get_effects();
+					const auto precs = task.actions[action].get_precondition();
+					bool hasSideEffect = false;
+					int effectIndex = -1;
+    	    		for (size_t eff = 0; eff < effs.size(); eff++) {
+						const auto & effObjec = effs[eff];
+						int predicate = effObjec.predicate_symbol;
+						if (predicate == pIndex) { effectIndex = eff; continue;} // this one might increase
+
+						int thisChange = calculateEffectBalance(task,task.actions[action],effObjec, true); // be conservative on effects
+
+						if (thisChange != 0) hasSideEffect = true;
+					}
+
+					if (!hasSideEffect){
+						DEBUG(cout << "Only achiever has no side effects. So its preconditions are only relevant if connected to the goal." << endl);
+						goalAchieverActionsWithoutSideEffects[action] = {action, effectIndex};	
+					}
 				}
 			}
 		}
-	}
 
-	foundOrdinaryPredicate = false;
-	set<int> ordinaryPredicates;
-	for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
-		auto p = task.predicates[pIndex];
-		if (p.isStaticPredicate()) continue; // static predicates get special treatment
-		if (p.getArity() == 0) continue; // static predicates get special treatment
-		cout << "Predicate " << p.getName() << endl;
+		for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
+			auto p = task.predicates[pIndex];
+			if (p.isStaticPredicate()) continue; // static predicates get special treatment
+			if (p.getArity() == 0) continue; // static predicates get special treatment
+			cout << "Predicate " << p.getName() << endl;
 
-		bool occursInPre = false;
-		bool isMonotonePos = true;
-		bool isMonotoneNeg = true;
-		vector<int> achievers;
+			bool occursInPre = false;
+			bool isMonotonePos = true;
+			bool isMonotoneNeg = true;
+			vector<int> achievers;
 
-		for (size_t action = 0; action < task.actions.size(); action++){
-			const auto effs = task.actions[action].get_effects();
-			const auto precs = task.actions[action].get_precondition();
-	    
-			for (size_t prec = 0; prec < precs.size(); prec++) {
-				const auto & precObjec = precs[prec];
-				int prePredicate = precObjec.predicate_symbol;
-				if (prePredicate != pIndex) continue;
-				if (goalAchieverActionsWithoutSideEffects.count(action)){
-					DEBUG(cout << "Action " << task.actions[action].get_name() << " is goal achiever as has predicate " << p.getName() << " as a precondition." << endl);
-					auto [achieverAction, achieverEffect] = goalAchieverActionsWithoutSideEffects[action];
-					// so this is a precondition of an action whose sole effect is to make a goal true.
-					set<int> effectVariables;
-					map<int,vector<int>> effectVariablesOriginalPositions;
-					const auto goalEffect = task.actions[achieverAction].get_effects()[achieverEffect];
+			for (size_t action = 0; action < task.actions.size(); action++){
+				const auto effs = task.actions[action].get_effects();
+				const auto precs = task.actions[action].get_precondition();
+		    
+				for (size_t prec = 0; prec < precs.size(); prec++) {
+					const auto & precObjec = precs[prec];
+					int prePredicate = precObjec.predicate_symbol;
+					if (prePredicate != pIndex) continue;
+					if (goalAchieverActionsWithoutSideEffects.count(action)){
+						DEBUG(cout << "Action " << task.actions[action].get_name() << " is goal achiever as has predicate " << p.getName() << " as a precondition." << endl);
+						auto [achieverAction, achieverEffect] = goalAchieverActionsWithoutSideEffects[action];
+						// so this is a precondition of an action whose sole effect is to make a goal true.
+						set<int> effectVariables;
+						map<int,vector<int>> effectVariablesOriginalPositions;
+						const auto goalEffect = task.actions[achieverAction].get_effects()[achieverEffect];
 
-					for (size_t i = 0; i < goalEffect.arguments.size(); i++){
-						if (goalEffect.arguments[i].constant) continue; // don't care about this one
-						effectVariables.insert(goalEffect.arguments[i].index);
-						effectVariablesOriginalPositions[goalEffect.arguments[i].index].push_back(i);
-					}
-				
-					vector<int> additionalAruguments;	
-					for (size_t i = 0; i < precObjec.arguments.size(); i++){
-						if (precObjec.arguments[i].constant) continue; // don't care about this one
-						if (effectVariables.count(precObjec.arguments[i].index)) {
-							continue;
+						for (size_t i = 0; i < goalEffect.arguments.size(); i++){
+							if (goalEffect.arguments[i].constant) continue; // don't care about this one
+							effectVariables.insert(goalEffect.arguments[i].index);
+							effectVariablesOriginalPositions[goalEffect.arguments[i].index].push_back(i);
 						}
-						additionalAruguments.push_back(precObjec.arguments[i].index);
-					}
-
-					map<int,int> argumentSingleValue;
-					DEBUG(cout << "precondition has additional arguments:");
-					for (int arg: additionalAruguments){
-						int type = task.actions[action].get_parameters()[arg].type;
-						vector<int> possibleValues;
-					    for (tSize obj = 0; obj < task.objects.size(); obj++) {
-					        auto oTypes = task.objects[obj].getTypes();
-							for (int t : oTypes)
-								if (t == type)
-									possibleValues.push_back(obj);
-						}
-
-						DEBUG(cout << " No " << arg << " of type " << type << " " << task.type_names[type] << "  (domain: ";
-					  	for (int obj : possibleValues) cout << " " << obj;
-						cout << " )");
-						
-						if (possibleValues.size() != 1) occursInPre = true;
-						else argumentSingleValue[arg] = possibleValues[0];
-					}
-					DEBUG(cout << endl);
-					if (occursInPre) continue;
-
-					DEBUG(cout << "Goal Effect Predicate " << goalEffect.predicate_symbol << " " << task.predicates[goalEffect.predicate_symbol].getName() << 
-							" has " << predicateNoPreMonotone[goalEffect.predicate_symbol].size() << " instances."<< endl);
-					// we need to generate the tuples that we will actually want to keep track
-					for (vector<int> currentTuple : predicateNoPreMonotone[goalEffect.predicate_symbol]){
-						vector<int> newTuple;
-						bool reject = false;
+					
+						vector<int> additionalAruguments;	
 						for (size_t i = 0; i < precObjec.arguments.size(); i++){
-							if (precObjec.arguments[i].constant) {
-								newTuple.push_back(precObjec.arguments[i].index);
-							} else if (effectVariables.count(precObjec.arguments[i].index)) {
-								// these are parameters that need to be copied	
-								set<int> valuesFromPositions;
-								for(int tuplePosition : effectVariablesOriginalPositions[precObjec.arguments[i].index])
-									valuesFromPositions.insert(currentTuple[tuplePosition]);
+							if (precObjec.arguments[i].constant) continue; // don't care about this one
+							if (effectVariables.count(precObjec.arguments[i].index)) {
+								continue;
+							}
+							additionalAruguments.push_back(precObjec.arguments[i].index);
+						}
 
-								if (valuesFromPositions.size() > 1) reject = true;
-								else newTuple.push_back(*valuesFromPositions.begin());
-							} else {
-								newTuple.push_back(argumentSingleValue[precObjec.arguments[i].index]);
+						map<int,int> argumentSingleValue;
+						DEBUG(cout << "precondition has additional arguments:");
+						for (int arg: additionalAruguments){
+							int type = task.actions[action].get_parameters()[arg].type;
+							vector<int> possibleValues;
+						    for (tSize obj = 0; obj < task.objects.size(); obj++) {
+						        auto oTypes = task.objects[obj].getTypes();
+								for (int t : oTypes)
+									if (t == type)
+										possibleValues.push_back(obj);
+							}
+
+							DEBUG(cout << " No " << arg << " of type " << type << " " << task.type_names[type] << "  (domain: ";
+						  	for (int obj : possibleValues) cout << " " << obj;
+							cout << " )");
+							
+							if (possibleValues.size() != 1) occursInPre = true;
+							else argumentSingleValue[arg] = possibleValues[0];
+						}
+						DEBUG(cout << endl);
+						if (occursInPre) continue;
+
+						DEBUG(cout << "Goal Effect Predicate " << goalEffect.predicate_symbol << " " << task.predicates[goalEffect.predicate_symbol].getName() << 
+								" has " << predicateNoPreMonotone[goalEffect.predicate_symbol].size() << " instances."<< endl);
+						// we need to generate the tuples that we will actually want to keep track
+						for (vector<int> currentTuple : predicateNoPreMonotone[goalEffect.predicate_symbol]){
+							vector<int> newTuple;
+							bool reject = false;
+							for (size_t i = 0; i < precObjec.arguments.size(); i++){
+								if (precObjec.arguments[i].constant) {
+									newTuple.push_back(precObjec.arguments[i].index);
+								} else if (effectVariables.count(precObjec.arguments[i].index)) {
+									// these are parameters that need to be copied	
+									set<int> valuesFromPositions;
+									for(int tuplePosition : effectVariablesOriginalPositions[precObjec.arguments[i].index])
+										valuesFromPositions.insert(currentTuple[tuplePosition]);
+
+									if (valuesFromPositions.size() > 1) reject = true;
+									else newTuple.push_back(*valuesFromPositions.begin());
+								} else {
+									newTuple.push_back(argumentSingleValue[precObjec.arguments[i].index]);
+								}
+							}
+							if (!reject){
+								predicateNoPreMonotone[pIndex].insert(newTuple);
 							}
 						}
-						if (!reject){
-							predicateNoPreMonotone[pIndex].insert(newTuple);
-						}
+						DEBUG(cout << endl);
+						continue;
 					}
-					DEBUG(cout << endl);
-					continue;
+					occursInPre = true;
 				}
-				occursInPre = true;
+
+    		    for (size_t eff = 0; eff < effs.size(); eff++) {
+					const auto & effObjec = effs[eff];
+					int predicate = effObjec.predicate_symbol;
+					if (predicate != pIndex) continue;
+					if (effObjec.negated)
+						isMonotonePos = false;
+					else{
+						isMonotoneNeg = false;
+						achievers.push_back(action); // if it makes multiple goals true -> can't handle that ...
+					}
+				}
 			}
 
-    	    for (size_t eff = 0; eff < effs.size(); eff++) {
-				const auto & effObjec = effs[eff];
-				int predicate = effObjec.predicate_symbol;
-				if (predicate != pIndex) continue;
-				if (effObjec.negated)
-					isMonotonePos = false;
-				else{
-					isMonotoneNeg = false;
-					achievers.push_back(action); // if it makes multiple goals true -> can't handle that ...
-				}
+
+
+			if (stablePredicates.count(pIndex)) cout << "\t" << color(COLOR_GREEN,"Stable ") << stablePredicates[pIndex] << " are true" << endl;
+			if (maxStablePredicates.count(pIndex)) cout << "\t" << color(COLOR_GREEN,"Limit Stable ") << maxStablePredicates[pIndex] << " are true" << endl;
+			cout << "\tOnly in Effects " << boolalpha << !occursInPre << endl;
+			cout << "\tMonotone rising " << boolalpha << isMonotonePos << endl;
+			cout << "\tRising only eff " << ((!occursInPre && isMonotonePos)?color(COLOR_GREEN,"true"):"false") << endl;
+			cout << "\tMonotone falling " << ((isMonotoneNeg)?color(COLOR_GREEN,"true"):"false") << endl;
+
+			// we might need to take a judgement on how to handle this predicate
+			if (isMonotoneNeg){
+				// monotone neg takes precedence as this can be encoded easily
+				predicatesMonotoneNegEncoding.insert(pIndex);
+				predicateNoPreMonotone.erase(pIndex);
+				cout << "\t" << color(COLOR_CYAN, "Decision: ") << "monotone neg" << endl;
+			} else if (!occursInPre && isMonotonePos) {
+				// Attention: this output is needed! We need to force that even if predicateNoPreMonotone[pIndex] is empty, it is contained
+				cout << "\t" << color(COLOR_CYAN, "Decision: ") << "no precondition monotone (size " << predicateNoPreMonotone[pIndex].size() << ")" << endl;
+				DEBUG(cout << "insert " << pIndex << " amount: " << predicateNoPreMonotone[pIndex].size() << endl;
+				for (vector<int> tuple : predicateNoPreMonotone[pIndex]){
+					cout << "\t\t" << task.predicates[pIndex].getName();
+					for (int i : tuple) cout << " " << i << " " << task.objects[i].getName();
+					cout << endl;
+				});
+			} else if (stablePredicates.count(pIndex)){
+				predicateStable[pIndex] = stablePredicates[pIndex];
+				predicateNoPreMonotone.erase(pIndex);
+				cout << "\t" << color(COLOR_CYAN, "Decision: ") << "stable " << predicateStable[pIndex] << endl;
+			} else if (maxStablePredicates.count(pIndex)){
+				predicateStable[pIndex] = maxStablePredicates[pIndex]; // this causes *most* of the code related to stable stuff
+				predicateMaxStable[pIndex] = maxStablePredicates[pIndex];
+				predicateNoPreMonotone.erase(pIndex);
+				cout << "\t" << color(COLOR_CYAN, "Decision: ") << "max stable " << predicateMaxStable[pIndex] << endl;
+			} else {
+				cout << "\t" << color(COLOR_RED, "Decision: ") << "normal" << endl;
+				foundOrdinaryPredicate = true;
+				ordinaryPredicates.insert(pIndex);
 			}
+			cout << endl << endl;
 		}
-
-
-
-		if (stablePredicates.count(pIndex)) cout << "\t" << color(COLOR_GREEN,"Stable ") << stablePredicates[pIndex] << " are true" << endl;
-		if (maxStablePredicates.count(pIndex)) cout << "\t" << color(COLOR_GREEN,"Limit Stable ") << maxStablePredicates[pIndex] << " are true" << endl;
-		cout << "\tOnly in Effects " << boolalpha << !occursInPre << endl;
-		cout << "\tMonotone rising " << boolalpha << isMonotonePos << endl;
-		cout << "\tRising only eff " << ((!occursInPre && isMonotonePos)?color(COLOR_GREEN,"true"):"false") << endl;
-		cout << "\tMonotone falling " << ((isMonotoneNeg)?color(COLOR_GREEN,"true"):"false") << endl;
-
-		// we might need to take a judgement on how to handle this predicate
-		if (isMonotoneNeg){
-			// monotone neg takes precedence as this can be encoded easily
-			predicatesMonotoneNegEncoding.insert(pIndex);
-			predicateNoPreMonotone.erase(pIndex);
-			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "monotone neg" << endl;
-		} else if (!occursInPre && isMonotonePos) {
-			// Attention: this output is needed! We need to force that even if predicateNoPreMonotone[pIndex] is empty, it is contained
-			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "no precondition monotone (size " << predicateNoPreMonotone[pIndex].size() << ")" << endl;
-			DEBUG(cout << "insert " << pIndex << " amount: " << predicateNoPreMonotone[pIndex].size() << endl;
-			for (vector<int> tuple : predicateNoPreMonotone[pIndex]){
-				cout << "\t\t" << task.predicates[pIndex].getName();
-				for (int i : tuple) cout << " " << i << " " << task.objects[i].getName();
-				cout << endl;
-			});
-		} else if (stablePredicates.count(pIndex)){
-			predicateStable[pIndex] = stablePredicates[pIndex];
-			predicateNoPreMonotone.erase(pIndex);
-			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "stable " << predicateStable[pIndex] << endl;
-		} else if (maxStablePredicates.count(pIndex)){
-			predicateStable[pIndex] = maxStablePredicates[pIndex]; // this causes *most* of the code related to stable stuff
-			predicateMaxStable[pIndex] = maxStablePredicates[pIndex];
-			predicateNoPreMonotone.erase(pIndex);
-			cout << "\t" << color(COLOR_CYAN, "Decision: ") << "max stable " << predicateMaxStable[pIndex] << endl;
-		} else {
-			cout << "\t" << color(COLOR_RED, "Decision: ") << "normal" << endl;
-			foundOrdinaryPredicate = true;
+	} else {
+		foundOrdinaryPredicate = true;
+		for (int pIndex = 0; pIndex < int(task.predicates.size()); pIndex++) {
+			auto p = task.predicates[pIndex];
+			if (p.isStaticPredicate()) continue; // static predicates get special treatment
+			if (p.getArity() == 0) continue; // static predicates get special treatment
 			ordinaryPredicates.insert(pIndex);
-		}
-		cout << endl << endl;
+		}	
 	}
 
 	if (!foundOrdinaryPredicate){
