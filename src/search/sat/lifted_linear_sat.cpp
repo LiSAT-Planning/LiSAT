@@ -1971,85 +1971,170 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 
 		// maybe select from init
 		if (time == 0){
+
+			int relevantInitSize = 0;
+			vector<pair<int, vector<int> >> initList;
 			for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
 				if (task.predicates[predicate].getArity() == 0) continue;
 				if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
 				if (predicateStable.count(predicate)) continue;
 				if (predicateNoPreMonotone.count(predicate)) continue;
 				if (predicatesMonotoneNegEncoding.count(predicate)) continue;
+				relevantInitSize += supportingPredicateTuples[predicate].size();
+				for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
+					vector<int> tuple = supportingPredicateTuples[predicate][i].first;
+					initList.push_back({predicate, tuple});
+				}
+			}
 
-				// consider how many arguments are there
-				int predicateVar = thisSlotPredicates[predicate];
-				DEBUG(cout << "PREDICATE VAR " << predicateVar << endl);
-				if (task.predicates[predicate].getArity() == 1){
-					vector<int> possibleValues;
-					
-					for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
-						vector<int> tuple = supportingPredicateTuples[predicate][i].first;
-					
-						int myObjIndex = objToIndex[tuple[0]];
-						int myParam = predicateArgumentPositions[predicate][0];
-						int constantVar = thisSlotParameterVars[myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
-						
-						possibleValues.push_back(constantVar);
-						//cout << "QQ " << constantVar << " " << myParam << " " << myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]] << " " << myObjIndex << " " << typeOfPredicateArgument[myParam]  << " " << lowerTindex[typeOfPredicateArgument[myParam]] << endl;
+			if (width >= relevantInitSize){
+				if (slot >= relevantInitSize){
+					// there is no predicate at such slots
+					for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
+						if (task.predicates[predicate].getArity() == 0) continue;
+						if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
+						if (predicateStable.count(predicate)) continue;
+						if (predicateNoPreMonotone.count(predicate)) continue;
+						if (predicatesMonotoneNegEncoding.count(predicate)) continue;
+
+						assertNot(solver,thisSlotPredicates[predicate]);
 					}
-					//cout << "A " << predicateVar << endl;
-					impliesOr(solver,predicateVar,possibleValues);
 				} else {
-					for (size_t lastPos = 0; lastPos < size_t(task.predicates[predicate].getArity() - 1) ; lastPos++){
-						map<vector<int>,set<int>> possibleUpto;
-				
-						// build assignment tuple up to this point
+					auto [predicate, tuple] = initList[slot];
+					assertYes(solver,thisSlotPredicates[predicate]);
+
+					for (size_t index = 0; index < tuple.size(); index++){
+						int myObjIndex = objToIndex[tuple[index]];
+						int myParam = predicateArgumentPositions[predicate][index];
+						int constantVar = thisSlotParameterVars[myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+						assertYes(solver,constantVar);
+					}
+				}
+			} else {
+				for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
+					if (task.predicates[predicate].getArity() == 0) continue;
+					if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
+					if (predicateStable.count(predicate)) continue;
+					if (predicateNoPreMonotone.count(predicate)) continue;
+					if (predicatesMonotoneNegEncoding.count(predicate)) continue;
+
+					// consider how many arguments are there
+					int predicateVar = thisSlotPredicates[predicate];
+
+					for (int befSlot = 0; befSlot < slot; befSlot++){
+						// if we select the predicate here, we cannot use use *later* predicates earlier on in the slots
+						for (size_t laterPredicate = predicate + 1; laterPredicate < task.predicates.size(); laterPredicate++){
+							if (task.predicates[laterPredicate].getArity() == 0) continue;
+							if (task.predicates[laterPredicate].isStaticPredicate()) continue; // nothing to do
+							if (predicateStable.count(laterPredicate)) continue;
+							if (predicateNoPreMonotone.count(laterPredicate)) continue;
+							if (predicatesMonotoneNegEncoding.count(laterPredicate)) continue;
+							
+							int befSlotLaterPredicateVar = thisTimePredicateSlotVariables[befSlot][laterPredicate];
+
+							impliesNot(solver,predicateVar, befSlotLaterPredicateVar);
+						}
+						// if before is the same predicate, it must be a lexicographically smaller tuple
+						for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
+							for (size_t j = i+1; j < supportingPredicateTuples[predicate].size(); j++){
+								vector<int> firstTuple = supportingPredicateTuples[predicate][i].first;
+								vector<int> secondTuple = supportingPredicateTuples[predicate][i].first;
+								set<int> identical;
+								identical.insert(predicateVar);
+								identical.insert(thisTimePredicateSlotVariables[befSlot][predicate]);
+								
+								for (size_t pos = 0; pos < size_t(task.predicates[predicate].getArity()) ; pos++){
+									int myObjIndexFirst = objToIndex[firstTuple[pos]];
+									int myObjIndexSecond = objToIndex[secondTuple[pos]];
+									int myParam = predicateArgumentPositions[predicate][pos];
+									if (myObjIndexFirst == myObjIndexSecond){ // still same up to here
+										identical.insert(thisSlotParameterVars[myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
+										identical.insert(thisTimeArgumentSlotVariables[befSlot][myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
+									} else {
+										identical.insert(thisSlotParameterVars[myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
+										int forbiddenVar = thisTimeArgumentSlotVariables[befSlot][myParam][myObjIndexSecond - lowerTindex[typeOfPredicateArgument[myParam]]];
+
+										andImpliesNot(solver,identical,forbiddenVar);
+										break; // we have done our job!
+									}
+								}
+							}
+						}
+					}
+
+
+					DEBUG(cout << "PREDICATE VAR " << predicateVar << endl);
+					if (task.predicates[predicate].getArity() == 1){
+						vector<int> possibleValues;
+						
 						for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
 							vector<int> tuple = supportingPredicateTuples[predicate][i].first;
-							vector<int> subTuple;
-							subTuple.push_back(predicateVar);
 						
-							for (size_t j = 0; j <= lastPos; j++){
-								// push only the non-constants
-								int myObjIndex = objToIndex[tuple[j]];
-								int myParam = predicateArgumentPositions[predicate][j];
-								int constantVar = thisSlotParameterVars[myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+							int myObjIndex = objToIndex[tuple[0]];
+							int myParam = predicateArgumentPositions[predicate][0];
+							int constantVar = thisSlotParameterVars[myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+							
+							possibleValues.push_back(constantVar);
+							//cout << "QQ " << constantVar << " " << myParam << " " << myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]] << " " << myObjIndex << " " << typeOfPredicateArgument[myParam]  << " " << lowerTindex[typeOfPredicateArgument[myParam]] << endl;
+						}
+						//cout << "A " << predicateVar << endl;
+						impliesOr(solver,predicateVar,possibleValues);
+					} else {
+						//cout << "Predicate supporting tuples " << supportingPredicateTuples[predicate].size() << endl;
+						for (size_t lastPos = 0; lastPos < size_t(task.predicates[predicate].getArity() - 1) ; lastPos++){
+							map<vector<int>,set<int>> possibleUpto;
+					
+							// build assignment tuple up to this point
+							for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
+								vector<int> tuple = supportingPredicateTuples[predicate][i].first;
+								vector<int> subTuple;
+								subTuple.push_back(predicateVar);
+							
+								for (size_t j = 0; j <= lastPos; j++){
+									// push only the non-constants
+									int myObjIndex = objToIndex[tuple[j]];
+									int myParam = predicateArgumentPositions[predicate][j];
+									int constantVar = thisSlotParameterVars[myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
+									
+									subTuple.push_back(constantVar);
+								}
 								
-								subTuple.push_back(constantVar);
+								int myObjIndex = objToIndex[tuple[lastPos + 1]];
+								int myParam = predicateArgumentPositions[predicate][lastPos+1];
+								int localObjectNumber = myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]];
+								//if (localObjectNumber >= parameterVars[time][myParam].size()) cout << "F " << localObjectNumber << " " << parameterVars[time][myParam].size() << endl;
+								int constantVar = thisSlotParameterVars[myParam][localObjectNumber];
+					
+								possibleUpto[subTuple].insert(constantVar);
+							}
+					
+							//cout << "B" << endl;
+					
+							for (auto & x : possibleUpto){
+								andImpliesOr(solver,x.first,x.second);
+								DEBUG(for (int i : x.first) cout << " - [" << i << " " << capsule.variableNames[i] << "]";
+								for (int i : x.second) cout << " [" << capsule.variableNames[i] << "]";
+								cout << endl);
+							}
+
+							//cout << "C" << endl;
+					
+							if (lastPos == 0){
+								int posOfValue = 1;
+								vector<int> initial;
+								for (auto & x : possibleUpto)
+									initial.push_back(x.first[posOfValue]);
+								
+								//cout << "C" << endl;
+								impliesOr(solver,predicateVar,initial);
+								DEBUG(		
+								cout << "- [" << predicateVar << " " << capsule.variableNames[predicateVar] << "]";
+								for (int i : initial) cout << " [" << capsule.variableNames[i] << "]";
+								cout << endl);
 							}
 							
-							int myObjIndex = objToIndex[tuple[lastPos + 1]];
-							int myParam = predicateArgumentPositions[predicate][lastPos+1];
-							int localObjectNumber = myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]];
-							//if (localObjectNumber >= parameterVars[time][myParam].size()) cout << "F " << localObjectNumber << " " << parameterVars[time][myParam].size() << endl;
-							int constantVar = thisSlotParameterVars[myParam][localObjectNumber];
-				
-							possibleUpto[subTuple].insert(constantVar);
+							//cout << "D " << task.predicates[predicate].getArity() << endl;
 						}
-				
-						//cout << "B" << endl;
-				
-						for (auto & x : possibleUpto){
-							andImpliesOr(solver,x.first,x.second);
-							DEBUG(for (int i : x.first) cout << " - [" << i << " " << capsule.variableNames[i] << "]";
-							for (int i : x.second) cout << " [" << capsule.variableNames[i] << "]";
-							cout << endl);
-						}
-
-						//cout << "C" << endl;
-				
-						if (lastPos == 0){
-							int posOfValue = 1;
-							vector<int> initial;
-							for (auto & x : possibleUpto)
-								initial.push_back(x.first[posOfValue]);
-							
-							//cout << "C" << endl;
-							impliesOr(solver,predicateVar,initial);
-							DEBUG(		
-							cout << "- [" << predicateVar << " " << capsule.variableNames[predicateVar] << "]";
-							for (int i : initial) cout << " [" << capsule.variableNames[i] << "]";
-							cout << endl);
-						}
-						
-						//cout << "D " << task.predicates[predicate].getArity() << endl;
 					}
 				}
 			}
@@ -3369,7 +3454,6 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 		if (width < widthNeeded) widthNeeded = width;
 
 		cout << color(COLOR_GREEN,"Solving for ") << "length " << i+1 << " with width " << widthNeeded << endl; 
-
 	
 		// if not in incremental mode, we need to generate the formula for all timesteps.
 		if (!incremental){
