@@ -227,6 +227,14 @@ void andImplies(void* solver, std::set<int> i, int j){
 	number_of_clauses++;
 }
 
+void andImpliesNot(void* solver, std::set<int> i, int j){
+	for (const int & x : i)
+		ipasir_add(solver,-x);
+	ipasir_add(solver,-j);
+	ipasir_add(solver,0);
+	number_of_clauses++;
+}
+
 void notAll(void* solver, std::set<int> i){
 	for (const int & x : i)
 		ipasir_add(solver,-x);
