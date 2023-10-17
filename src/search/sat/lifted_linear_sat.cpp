@@ -2580,6 +2580,9 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 							}
 							
 							if (!impossible) possibleUpto[subTuple].insert(nextConstantVar);
+							// force generation of this entry, but *only* if there is a actually a subtuple
+							// i.e. a beginning of a static instance that we want to continue
+							else if (lastPos != 0) possibleUpto[subTuple].size(); 
 						}
 			
 						if (possibleUpto.size() == 0)
