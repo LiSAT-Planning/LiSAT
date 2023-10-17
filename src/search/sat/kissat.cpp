@@ -16,7 +16,7 @@ std::vector<std::vector<int>> formula;
 std::vector<int> curclause;
 int maxVar = -1;
 
-#undef NDEBUG
+//#undef NDEBUG
 
 extern "C" {
 
