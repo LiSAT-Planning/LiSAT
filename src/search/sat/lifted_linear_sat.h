@@ -48,7 +48,9 @@ private:
     int maxPrec = -1;
 
 	int maximumTimeStepNetChange;
+	int maximumTimeNeededPre;
 	int goalNeededWidth;
+	std::vector<std::pair<int, std::vector<int> >> initList;
 
 	int numObjs = -1;
     int numActions = -1;
@@ -85,9 +87,9 @@ public:
     LiftedLinearSAT(const Task& task, bool inferStructure);
 	utils::ExitCode solve(const Task& task, int limit, bool optimal, bool incremental, int width, int timelimitInSeconds);
 	void generate_predicate_slot_layer(const Task &task, void* solver, sat_capsule & capsule, int width, int time);
-	std::vector<std::vector<std::vector<std::vector<int>>>> generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int actionTime, int stateTime);
+	std::vector<std::vector<std::vector<std::vector<int>>>> generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int previousSlots, int actionTime, int stateTime);
 	void generate_goal_assertion(const Task &task, void* solver, sat_capsule & capsule, int width, int time);
-	void generate_formula(const Task &task, void* solver, sat_capsule & capsule, int width, bool optimal);
+	void generate_formula(const Task &task, void* solver, sat_capsule & capsule, int width, int fromInitWidthNeeded, bool optimal, bool widthMaximal, bool listTime);
 	bool callSolver(sat_capsule & capsule, void* solver, const Task &task, int width, const std::clock_t & startTime,long long time_limit_in_ms = -1);
 	bool atom_not_satisfied(const DBState &s, const AtomicGoal &atomicGoal) const;
 

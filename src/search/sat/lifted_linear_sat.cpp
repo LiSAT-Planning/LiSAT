@@ -40,7 +40,14 @@ map<int,set<pair<int,int>>> perPredicatePossibleBeforeEquals;
 map<int,set<pair<int,int>>> perPredicatePossibleAfterEquals;
 
 
-int calculateEffectBalance(const Task & task, const ActionSchema & action, const Atom & effObjec, bool conservativeDeletes = false){
+// action -> preconditions that provide balancer positions
+map<int, set<int> > addingBalancerMap;
+
+// the actual decision on the balancer, either a general list, or a list per predicate for the stable and max stable ones
+map<int, vector<int> > generalBalancer;
+map<int, map<int, vector<int> > > perPredicateBalancer;
+
+int calculateEffectBalance(const Task & task, const ActionSchema & action, const Atom & effObjec, int effIndex, bool conservativeDeletes = false){
 	int predicate = effObjec.predicate_symbol;
 
 	// maybe we have an overriding adding effect
@@ -80,7 +87,11 @@ int calculateEffectBalance(const Task & task, const ActionSchema & action, const
 				bad = true;
 			}
 		}
-		if (!bad) balancer = true;
+		if (!bad) {
+			balancer = true;
+			if (effObjec.negated)
+				addingBalancerMap[action.get_index()].insert(prec); // remember who the balancer was.
+		}
 	}
 
 	//cout << "EFF " << eff << " " << balancer << " " << effObjec.negated << endl;
@@ -121,7 +132,7 @@ int calculateOverallBalanceOfPredicate(const Task & task, int pIndex){
 			int predicate = effs[eff].predicate_symbol;
 			if (predicate != pIndex) continue;
 
-			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
+			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff], eff);
 			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
@@ -150,7 +161,7 @@ int calculateOverallBalanceOfPredicatePair(const Task & task, int pIndex, int pI
 			int predicate = effs[eff].predicate_symbol;
 			if (predicate != pIndex && predicate != pIndex2) continue;
 
-			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
+			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff], eff);
 			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
@@ -182,7 +193,7 @@ int calculateOverallBalanceOfPredicateSet(const Task & task, set<int> pIndices){
 			int predicate = effs[eff].predicate_symbol;
 			if (pIndices.count(predicate) == 0) continue;
 
-			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
+			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff], eff);
 			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
@@ -209,7 +220,7 @@ int calculateOverallBalanceOfPredicateAndNullary(const Task & task, int pIndex, 
 			int predicate = effs[eff].predicate_symbol;
 			if (predicate != pIndex) continue;
 
-			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
+			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff], eff);
 			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
@@ -235,7 +246,7 @@ int calculateOverallBalanceOfAction(const Task & task, int action, set<int> cons
 		int predicate = effs[eff].predicate_symbol;
 		if (consideredPredicates.count(predicate) == 0) continue;
 
-		int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
+		int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff], eff);
 		DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 		netChange += thisChange;
 	}
@@ -276,7 +287,7 @@ int calculateOverallBalanceOfNullaryAndNormal(const Task & task, vector<int> ari
 			int predicate = effs[eff].predicate_symbol;
 			if (normalPredicates.count(predicate) == 0) continue;
 
-			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
+			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff], eff);
 			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
@@ -308,7 +319,7 @@ int calculateOverallBalanceOfPredicateInPhasing(const Task & task, int pIndex, v
 			int predicate = effs[eff].predicate_symbol;
 			if (predicate != pIndex) continue;
 
-			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff]);
+			int thisChange = calculateEffectBalance(task,task.actions[action], effs[eff], eff);
 			DEBUG(cout << "\tEff " << task.predicates[predicate].getName() << " " << thisChange << endl);
 			netChange += thisChange;
 		}
@@ -933,7 +944,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task, bool inferStructure) {
 						int predicate = effObjec.predicate_symbol;
 						if (predicate == pIndex) { effectIndex = eff; continue;} // this one might increase
 
-						int thisChange = calculateEffectBalance(task,task.actions[action],effObjec, true); // be conservative on effects
+						int thisChange = calculateEffectBalance(task,task.actions[action],effObjec, eff, true); // be conservative on effects
 
 						if (thisChange != 0) hasSideEffect = true;
 					}
@@ -1124,6 +1135,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task, bool inferStructure) {
 		cout << "Found no ordinary predicate. Accepting the run only if W=0." << endl;
 	} else {
 		cout << "Found " << ordinaryPredicates.size() << " ordinary predicate." << endl;
+		int maxPreFromInitNecessary = 0;
 		int maxNetNecessary = 0;
 		for (size_t action = 0; action < task.actions.size(); action++){
 			int preSize = 0;
@@ -1134,10 +1146,11 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task, bool inferStructure) {
 				if (ordinaryPredicates.count(prePredicate) == 0) continue;
 				preSize ++;
 			}
+			
 			int change = calculateOverallBalanceOfAction(task,action,ordinaryPredicates);
 			if (change < 0) change = 0;
-			change += preSize;	
-			cout << "Action " << task.actions[action].get_name() << " net change: " << change << endl; 
+			cout << "Action " << task.actions[action].get_name() << " net change: " << change << " pre size: " << preSize << endl; 
+			if (preSize > maxPreFromInitNecessary) maxPreFromInitNecessary = preSize;
 			if (change > maxNetNecessary) maxNetNecessary = change;
 		}
 
@@ -1156,12 +1169,40 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task, bool inferStructure) {
 			}
 		}
 
-		cout << "Maximum net change: " << maxNetNecessary << " goal size: " << goalSize << endl;
+		cout << "Maximum net change: " << maxNetNecessary << " max pre from init " << maxPreFromInitNecessary << " goal size: " << goalSize << endl;
 		goalNeededWidth = goalSize;
 		maximumTimeStepNetChange = maxNetNecessary;
+		maximumTimeNeededPre = maxPreFromInitNecessary;
+
+		for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
+			if (task.predicates[predicate].getArity() == 0) continue;
+			if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
+			if (predicateStable.count(predicate)) continue;
+			if (predicateNoPreMonotone.count(predicate)) continue;
+			if (predicatesMonotoneNegEncoding.count(predicate)) continue;
+			for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
+				vector<int> tuple = supportingPredicateTuples[predicate][i].first;
+				initList.push_back({predicate, tuple});
+			}
+		}
+		cout << "Init list size: " << initList.size() << endl;
 	}
 
 	//exit(0);
+
+	cout << "Balancer Information:" << endl;
+	for (auto [action, balancePre] : addingBalancerMap){
+		cout << "\tAction " << task.actions[action].get_name() << endl;
+		for (int pre : balancePre){
+			int predicate = task.actions[action].get_precondition()[pre].predicate_symbol;
+			cout << "\t\tDeleted pre " << pre << " of predicate " << task.predicates[predicate].getName() << endl;
+
+			if (predicateStable.count(predicate))
+				perPredicateBalancer[action][predicate].push_back(pre);
+			else
+				generalBalancer[action].push_back(pre);
+		}
+	}
 
 
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1714,7 +1755,7 @@ vector<vector<vector<vector<vector<int>>>>> stablePredicateArgumentSlotVariables
 vector<map<int,map<vector<int>,int>>> monotoneIncreasingPredicates;
 vector<map<int,map<vector<int>,int>>> monotoneDecreasingPredicates;
 
-vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int actionTime, int stateTime){
+vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equality(const Task &task, void* solver, sat_capsule & capsule, int width, int previousSlots, int actionTime, int stateTime){
 	DEBUG(cout << "Starting to generate equality between actions@" << actionTime << " and state@" << stateTime << endl);
 	// variables for argument pos X = slot Y parameter pos Z
 	vector<vector<vector<int>>> planeEqualsVars;
@@ -1753,6 +1794,12 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 			// how many slots are there depends on what type of predicate this is	
 			int thisWidth = width;
 			if (isStable) thisWidth = predicateStable[predicate];
+			else {
+				if (actionTime == stateTime) {// a before case
+					// equals can only be with the part from init and the stuff that got added by it
+					thisWidth = previousSlots;
+				}
+			}
 
 			for (int slot = 0; slot < thisWidth; slot++){
 				DEBUG(cout << "\t Slot " << slot <<  endl);
@@ -1971,24 +2018,8 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 
 		// maybe select from init
 		if (time == 0){
-
-			int relevantInitSize = 0;
-			vector<pair<int, vector<int> >> initList;
-			for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
-				if (task.predicates[predicate].getArity() == 0) continue;
-				if (task.predicates[predicate].isStaticPredicate()) continue; // nothing to do
-				if (predicateStable.count(predicate)) continue;
-				if (predicateNoPreMonotone.count(predicate)) continue;
-				if (predicatesMonotoneNegEncoding.count(predicate)) continue;
-				relevantInitSize += supportingPredicateTuples[predicate].size();
-				for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
-					vector<int> tuple = supportingPredicateTuples[predicate][i].first;
-					initList.push_back({predicate, tuple});
-				}
-			}
-
-			if (width >= relevantInitSize){
-				if (slot >= relevantInitSize){
+			if (width >= int(initList.size())){
+				if (slot >= int(initList.size())){
 					// there is no predicate at such slots
 					for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
 						if (task.predicates[predicate].getArity() == 0) continue;
@@ -2037,21 +2068,21 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 						// if before is the same predicate, it must be a lexicographically smaller tuple
 						for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
 							for (size_t j = i+1; j < supportingPredicateTuples[predicate].size(); j++){
-								vector<int> firstTuple = supportingPredicateTuples[predicate][i].first;
-								vector<int> secondTuple = supportingPredicateTuples[predicate][i].first;
-								set<int> identical;
-								identical.insert(predicateVar);
-								identical.insert(thisTimePredicateSlotVariables[befSlot][predicate]);
+								vector<int> & firstTuple = supportingPredicateTuples[predicate][i].first;
+								vector<int> & secondTuple = supportingPredicateTuples[predicate][i].first;
+								vector<int> identical;
+								identical.push_back(predicateVar);
+								identical.push_back(thisTimePredicateSlotVariables[befSlot][predicate]);
 								
 								for (size_t pos = 0; pos < size_t(task.predicates[predicate].getArity()) ; pos++){
 									int myObjIndexFirst = objToIndex[firstTuple[pos]];
 									int myObjIndexSecond = objToIndex[secondTuple[pos]];
 									int myParam = predicateArgumentPositions[predicate][pos];
 									if (myObjIndexFirst == myObjIndexSecond){ // still same up to here
-										identical.insert(thisSlotParameterVars[myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
-										identical.insert(thisTimeArgumentSlotVariables[befSlot][myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
+										identical.push_back(thisSlotParameterVars[myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
+										identical.push_back(thisTimeArgumentSlotVariables[befSlot][myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
 									} else {
-										identical.insert(thisSlotParameterVars[myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
+										identical.push_back(thisSlotParameterVars[myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
 										int forbiddenVar = thisTimeArgumentSlotVariables[befSlot][myParam][myObjIndexSecond - lowerTindex[typeOfPredicateArgument[myParam]]];
 
 										andImpliesNot(solver,identical,forbiddenVar);
@@ -2330,17 +2361,21 @@ void LiftedLinearSAT::generate_goal_assertion(const Task &task, void* solver, sa
 //                       false -> generate the formula with assumptions instead of hard constraints
 // pastIncremental - true -> we are in an incremental run over the ACD
 
-void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsule & capsule, int width, bool optimal) {
+void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsule & capsule, int width, int fromInitWidthNeeded, bool optimal, bool widthMaximal, bool lastTime) {
 	bool generateBaseFormula = true; // this is for later. Set to false for incremental?
 
 	int bef = get_number_of_clauses();
 	// indices: timestep -> parameter -> object
 	int time = planLength-1;
 	int curPhase = phaseloop.size() ? (time % phaseloop.size()) : 0;
+	int previousSlots = fromInitWidthNeeded + time * maximumTimeStepNetChange;
 	
 	cout << "Generating time = " << setw(3) << time;
 	if (phaseloop.size())
-		cout << " phase = " << curPhase;
+		cout << " phase = " << setw(2) << curPhase;
+	cout << " previous slots = " << setw(3) << previousSlots;
+	if (lastTime)
+		cout << " last time";
 	cout << endl;
 	
 
@@ -2472,11 +2507,13 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	// that is to generate the variables for the *next* state, i.e., the effect state
 	generate_predicate_slot_layer(task, solver, capsule, width, time+1); // generate effect slots
 	// create equality from these actions to the previous state
-	vector<vector<vector<vector<int>>>> equalBefore = generate_action_state_equality(task, solver, capsule, width, time, time);
+	vector<vector<vector<vector<int>>>> equalBefore = generate_action_state_equality(task, solver, capsule, width, previousSlots, time, time);
 	// create equality from these actions to the next state
-	vector<vector<vector<vector<int>>>> equalAfter = generate_action_state_equality(task, solver, capsule, width, time, time+1);
+	vector<vector<vector<vector<int>>>> equalAfter = generate_action_state_equality(task, solver, capsule, width, previousSlots, time, time+1);
 
 
+
+	map<int, map<int, vector<int>>> thisTimePreSlotVariables;
 	// preconditions are actually met
 	for (size_t action = 0; action < task.actions.size(); action++){
 		if (phaseloop.size() && leavingActions[phaseloop[curPhase]].count(action) == 0) continue;
@@ -2710,6 +2747,14 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				}
 
 				for (int slot = 0; slot < thisWidth; slot++){
+					if (stableMode){
+					
+					} else if (widthMaximal){
+						// precondition can only come from the initial part of the state
+						if (slot >= previousSlots) continue;
+					}
+
+
 					int precSlotVar = capsule.new_variable();
 					precSlotVars.push_back(precSlotVar);
 					DEBUG(capsule.registerVariable(precSlotVar,to_string(time) + " @ action " + task.actions[action].get_name() + " prec " + to_string(prec) + " slot " + to_string(slot)));
@@ -2747,6 +2792,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 
 				impliesOr(solver,actionVar,precSlotVars);
+				thisTimePreSlotVariables[action][prec] = precSlotVars;
 				if (stableMode)
 					precSupportStable += get_number_of_clauses() - bef;
 				else
@@ -2783,6 +2829,9 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			if (predicateStable.count(predicate) == 0) continue;
 			thisActionStableSlotsSupporter[predicate].resize(predicateStable[predicate]);
 		}
+
+		int generalEffCounter = 0;
+		map<int,int> perPredicateEffCounter;
 
 		const auto effs = task.actions[action].get_effects();
 		for (size_t eff = 0; eff < effs.size(); eff++) {
@@ -2867,6 +2916,28 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			if (!effObjec.negated){
 				vector<int> effSlotVars;
 				for (int slot = 0; slot < thisWidth; slot++){
+					bool mustBeTrue = false;
+					int requiresVariable = -1;
+					// determine whether we actually have to generate this effect option.
+					if (stableMode){
+						// TODO XXX implement this case ...	
+					} else {
+						if (widthMaximal){ // if this is not width maximal, we have to leave all options open
+							if (generalEffCounter < int(generalBalancer[action].size())){
+								// this is an effect that we put into the position of the balancer
+								if (slot >= previousSlots) continue; // preconditions cannot stem from here
+								requiresVariable = thisTimePreSlotVariables[action][generalBalancer[action][generalEffCounter]][slot];
+							} else if (!lastTime) {
+								// we have to put it at the end of the end of the current maximum possible width
+								int mySlot = previousSlots + generalEffCounter - generalBalancer[action].size();
+								if (slot != mySlot){
+									continue; // we don't need to use this
+								}
+								mustBeTrue = true;
+							}
+						}
+					}
+
 					int effSlotVar = capsule.new_variable();
 					effSlotVars.push_back(effSlotVar);
 					
@@ -2883,8 +2954,15 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 					else
 						DEBUG(capsule.registerVariable(effSlotVar,to_string(time) + " @ action " + task.actions[action].get_name() + " eff " + to_string(eff) + " slot " + to_string(slot)));
 
-
 					implies(solver, -actionVar, -effSlotVar);
+					// we we know this is the position, we have to actually use it.
+					if (mustBeTrue){
+						implies(solver, actionVar, effSlotVar);
+					}
+					if (requiresVariable != -1){
+						implies(solver, effSlotVar, requiresVariable);
+						andImplies(solver, actionVar, requiresVariable, effSlotVar);
+					}
 
 					// predicate only needs to be enforced for unstable predicates
 					if (!stableMode){
@@ -2926,6 +3004,10 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 				}
 				// we don't need to force that we have that effect ...
 				//impliesOr(solver,actionVar,effSlotVars);
+				if (stableMode)
+					perPredicateEffCounter[predicate]++;
+				else
+					generalEffCounter++;
 			}
 			if (stableMode)
 				addEffectsStable += get_number_of_clauses() - bef;
@@ -3447,13 +3529,20 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 		}
 
 		// calculate the width we actually need
-		int widthNeeded = (i+1) * maximumTimeStepNetChange + goalNeededWidth;
+		bool widthMaximal = true;
+		int fromInitWidthNeeded = (i+1) * maximumTimeNeededPre;
+		if (fromInitWidthNeeded > int(initList.size())) fromInitWidthNeeded = int(initList.size());
+
+		int widthNeeded = fromInitWidthNeeded + i * maximumTimeStepNetChange + goalNeededWidth;
 		if (!foundOrdinaryPredicate) widthNeeded = 0;
 		
 		// if someone forced us to use lower width ...
-		if (width < widthNeeded) widthNeeded = width;
+		if (width < widthNeeded){
+		   widthNeeded = width;
+		   widthMaximal = false;
+		}
 
-		cout << color(COLOR_GREEN,"Solving for ") << "length " << i+1 << " with width " << widthNeeded << endl; 
+		cout << color(COLOR_GREEN,"Solving for ") << "length " << i+1 << " with width " << widthNeeded  << " from init " << fromInitWidthNeeded << endl; 
 	
 		// if not in incremental mode, we need to generate the formula for all timesteps.
 		if (!incremental){
@@ -3461,17 +3550,9 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 			generate_predicate_slot_layer(task, solver, capsule, widthNeeded, 0); // generate slots directly after init
 		}
 		
-		bool linearIncrease = true;
-		if (!linearIncrease){
-			while (planLength <= (1 << i)-1){
-				planLength++;
-				generate_formula(task,solver,capsule,widthNeeded, optimal);
-			}
-		} else {
-			while (planLength <= i){
-				planLength++;
-				generate_formula(task,solver,capsule,widthNeeded, optimal);
-			}
+		while (planLength <= i){
+			planLength++;
+			generate_formula(task,solver,capsule,widthNeeded, fromInitWidthNeeded, optimal, widthMaximal, planLength > i);
 		}
 
 		generate_goal_assertion(task, solver, capsule, widthNeeded, planLength);
