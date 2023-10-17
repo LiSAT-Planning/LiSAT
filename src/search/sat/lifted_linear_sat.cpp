@@ -1079,14 +1079,30 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task, bool inferStructure) {
 					cout << endl;
 				});
 			} else if (stablePredicates.count(pIndex)){
-				predicateStable[pIndex] = stablePredicates[pIndex];
-				predicateNoPreMonotone.erase(pIndex);
-				cout << "\t" << color(COLOR_CYAN, "Decision: ") << "stable " << predicateStable[pIndex] << endl;
+				if (stablePredicates[pIndex] >= 30){
+					cout << "\t" << color(COLOR_RED, "Decision: ") << "normal (but known to be stable at " << predicateStable[pIndex] << ")" << endl;
+					predicateStable.erase(pIndex);
+					predicateNoPreMonotone.erase(pIndex);
+					foundOrdinaryPredicate = true;
+					ordinaryPredicates.insert(pIndex);
+				} else {
+					predicateStable[pIndex] = stablePredicates[pIndex];
+					predicateNoPreMonotone.erase(pIndex);
+					cout << "\t" << color(COLOR_CYAN, "Decision: ") << "stable " << predicateStable[pIndex] << endl;
+				}
 			} else if (maxStablePredicates.count(pIndex)){
-				predicateStable[pIndex] = maxStablePredicates[pIndex]; // this causes *most* of the code related to stable stuff
-				predicateMaxStable[pIndex] = maxStablePredicates[pIndex];
-				predicateNoPreMonotone.erase(pIndex);
-				cout << "\t" << color(COLOR_CYAN, "Decision: ") << "max stable " << predicateMaxStable[pIndex] << endl;
+				if (maxStablePredicates[pIndex] >= 30){
+					cout << "\t" << color(COLOR_RED, "Decision: ") << "normal (but known to be max stable at " << predicateStable[pIndex] << ")" << endl;
+					predicateStable.erase(pIndex);
+					predicateNoPreMonotone.erase(pIndex);
+					foundOrdinaryPredicate = true;
+					ordinaryPredicates.insert(pIndex);
+				} else {
+					predicateStable[pIndex] = maxStablePredicates[pIndex]; // this causes *most* of the code related to stable stuff
+					predicateMaxStable[pIndex] = maxStablePredicates[pIndex];
+					predicateNoPreMonotone.erase(pIndex);
+					cout << "\t" << color(COLOR_CYAN, "Decision: ") << "max stable " << predicateMaxStable[pIndex] << endl;
+				}
 			} else {
 				cout << "\t" << color(COLOR_RED, "Decision: ") << "normal" << endl;
 				foundOrdinaryPredicate = true;
@@ -1121,6 +1137,7 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task, bool inferStructure) {
 			int change = calculateOverallBalanceOfAction(task,action,ordinaryPredicates);
 			if (change < 0) change = 0;
 			change += preSize;	
+			cout << "Action " << task.actions[action].get_name() << " net change: " << change << endl; 
 			if (change > maxNetNecessary) maxNetNecessary = change;
 		}
 
