@@ -1906,7 +1906,7 @@ vector<vector<vector<vector<int>>>> LiftedLinearSAT::generate_action_state_equal
 }
 
 
-void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solver, sat_capsule & capsule, int width, int time){
+void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solver, sat_capsule & capsule, int width, int time, int initWidth){
 
 	vector<vector<int>> thisTimePredicateSlotVariables; // slot -> predicate (contains -1 for static one)
 	vector<vector<vector<int>>> thisTimeArgumentSlotVariables; // slot -> position -> constant (0 is the first possible one)
@@ -2018,7 +2018,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 
 		// maybe select from init
 		if (time == 0){
-			if (width >= int(initList.size())){
+			if (initWidth >= int(initList.size())){
 				if (slot >= int(initList.size())){
 					// there is no predicate at such slots
 					for (size_t predicate = 0; predicate < task.predicates.size(); predicate++){
@@ -2505,7 +2505,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 	actionTyping += get_number_of_clauses() - bef;
 
 	// that is to generate the variables for the *next* state, i.e., the effect state
-	generate_predicate_slot_layer(task, solver, capsule, width, time+1); // generate effect slots
+	generate_predicate_slot_layer(task, solver, capsule, width, time+1, -1); // generate effect slots, init width does not matter
 	// create equality from these actions to the previous state
 	vector<vector<vector<vector<int>>>> equalBefore = generate_action_state_equality(task, solver, capsule, width, previousSlots, time, time);
 	// create equality from these actions to the next state
@@ -3547,7 +3547,7 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 		// if not in incremental mode, we need to generate the formula for all timesteps.
 		if (!incremental){
 			planLength = 0;
-			generate_predicate_slot_layer(task, solver, capsule, widthNeeded, 0); // generate slots directly after init
+			generate_predicate_slot_layer(task, solver, capsule, widthNeeded, 0, fromInitWidthNeeded); // generate slots directly after init
 		}
 		
 		while (planLength <= i){
