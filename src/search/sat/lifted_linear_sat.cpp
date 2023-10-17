@@ -1188,7 +1188,6 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task, bool inferStructure) {
 		cout << "Init list size: " << initList.size() << endl;
 	}
 
-	//exit(0);
 
 	cout << "Balancer Information:" << endl;
 	for (auto [action, balancePre] : addingBalancerMap){
@@ -1197,13 +1196,17 @@ LiftedLinearSAT::LiftedLinearSAT(const Task & task, bool inferStructure) {
 			int predicate = task.actions[action].get_precondition()[pre].predicate_symbol;
 			cout << "\t\tDeleted pre " << pre << " of predicate " << task.predicates[predicate].getName() << endl;
 
+			if (predicateNoPreMonotone.count(predicate)) continue;
+			if (predicatesMonotoneNegEncoding.count(predicate)) continue;
+
 			if (predicateStable.count(predicate))
 				perPredicateBalancer[action][predicate].push_back(pre);
 			else
 				generalBalancer[action].push_back(pre);
 		}
+		cout << "\t\t=> general " << generalBalancer[action].size() << endl;
 	}
-
+	
 
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////
 	numActions = task.actions.size();
@@ -2792,6 +2795,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 
 
 				impliesOr(solver,actionVar,precSlotVars);
+				DEBUG(cout << "PreslotVariables " << task.actions[action].get_name() << " pre #" << prec << endl);
 				thisTimePreSlotVariables[action][prec] = precSlotVars;
 				if (stableMode)
 					precSupportStable += get_number_of_clauses() - bef;
@@ -2841,6 +2845,7 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 			if (task.predicates[predicate].getName().rfind("type@", 0) == 0) continue;
 			if (task.predicates[predicate].getName().rfind("=", 0) == 0) continue; 
 			if (task.predicates[predicate].getArity() == 0) continue; 
+			DEBUG(cout << "GENERATING FOR EFFECT " << eff << " of predicate " << task.predicates[predicate].getName() << endl);
 			
 			if (predicateNoPreMonotone.count(predicate) || predicatesMonotoneNegEncoding.count(predicate)){
 				//if (predicatesMonotoneNegEncoding.count(predicate)) continue; // for debugging
@@ -2923,9 +2928,12 @@ void LiftedLinearSAT::generate_formula(const Task &task, void* solver, sat_capsu
 						// TODO XXX implement this case ...	
 					} else {
 						if (widthMaximal){ // if this is not width maximal, we have to leave all options open
+							DEBUG(cout << "GENERAL effect counter " << generalEffCounter << " vs " << generalBalancer[action].size() << endl);
 							if (generalEffCounter < int(generalBalancer[action].size())){
+								DEBUG(cout << "balancer " << generalBalancer[action][generalEffCounter] << endl);
 								// this is an effect that we put into the position of the balancer
 								if (slot >= previousSlots) continue; // preconditions cannot stem from here
+								DEBUG(cout << "SIZE " << thisTimePreSlotVariables[action][generalBalancer[action][generalEffCounter]].size() << " vs " << slot  << endl);
 								requiresVariable = thisTimePreSlotVariables[action][generalBalancer[action][generalEffCounter]][slot];
 							} else if (!lastTime) {
 								// we have to put it at the end of the end of the current maximum possible width
