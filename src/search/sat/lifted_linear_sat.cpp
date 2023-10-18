@@ -1913,6 +1913,8 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 
 	vector<vector<int>> thisTimePredicateSlotVariables; // slot -> predicate (contains -1 for static one)
 	vector<vector<vector<int>>> thisTimeArgumentSlotVariables; // slot -> position -> constant (0 is the first possible one)
+
+	map<int,vector<int>> prevSlotAllowedFactsPerPredicate; 
 	for (int slot = 0; slot < width; slot++){
 		DEBUG(cout << "\tSlot " << slot << endl);
 
@@ -2068,38 +2070,41 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 
 							impliesNot(solver,predicateVar, befSlotLaterPredicateVar);
 						}
-						// if before is the same predicate, it must be a lexicographically smaller tuple
-						for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
-							for (size_t j = i+1; j < supportingPredicateTuples[predicate].size(); j++){
-								vector<int> & firstTuple = supportingPredicateTuples[predicate][i].first;
-								vector<int> & secondTuple = supportingPredicateTuples[predicate][i].first;
-								vector<int> identical;
-								identical.push_back(predicateVar);
-								identical.push_back(thisTimePredicateSlotVariables[befSlot][predicate]);
-								
-								for (size_t pos = 0; pos < size_t(task.predicates[predicate].getArity()) ; pos++){
-									int myObjIndexFirst = objToIndex[firstTuple[pos]];
-									int myObjIndexSecond = objToIndex[secondTuple[pos]];
-									int myParam = predicateArgumentPositions[predicate][pos];
-									if (myObjIndexFirst == myObjIndexSecond){ // still same up to here
-										identical.push_back(thisSlotParameterVars[myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
-										identical.push_back(thisTimeArgumentSlotVariables[befSlot][myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
-									} else {
-										identical.push_back(thisSlotParameterVars[myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
-										int forbiddenVar = thisTimeArgumentSlotVariables[befSlot][myParam][myObjIndexSecond - lowerTindex[typeOfPredicateArgument[myParam]]];
+						//// if before is the same predicate, it must be a lexicographically smaller tuple
+						//for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
+						//	for (size_t j = i+1; j < supportingPredicateTuples[predicate].size(); j++){
+						//		vector<int> & firstTuple = supportingPredicateTuples[predicate][i].first;
+						//		vector<int> & secondTuple = supportingPredicateTuples[predicate][j].first;
+						//		vector<int> identical;
+						//		identical.push_back(predicateVar);
+						//		identical.push_back(thisTimePredicateSlotVariables[befSlot][predicate]);
+						//		
+						//		for (size_t pos = 0; pos < size_t(task.predicates[predicate].getArity()) ; pos++){
+						//			int myObjIndexFirst = objToIndex[firstTuple[pos]];
+						//			int myObjIndexSecond = objToIndex[secondTuple[pos]];
+						//			int myParam = predicateArgumentPositions[predicate][pos];
+						//			if (myObjIndexFirst == myObjIndexSecond){ // still same up to here
+						//				identical.push_back(thisSlotParameterVars[myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
+						//				identical.push_back(thisTimeArgumentSlotVariables[befSlot][myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
+						//			} else {
+						//				identical.push_back(thisSlotParameterVars[myParam][myObjIndexFirst - lowerTindex[typeOfPredicateArgument[myParam]]]);
+						//				int forbiddenVar = thisTimeArgumentSlotVariables[befSlot][myParam][myObjIndexSecond - lowerTindex[typeOfPredicateArgument[myParam]]];
 
-										andImpliesNot(solver,identical,forbiddenVar);
-										break; // we have done our job!
-									}
-								}
-							}
-						}
+						//				andImpliesNot(solver,identical,forbiddenVar);
+						//				break; // we have done our job!
+						//			}
+						//		}
+						//	}
+						//}
 					}
 
 
 					DEBUG(cout << "PREDICATE VAR " << predicateVar << endl);
 					if (task.predicates[predicate].getArity() == 1){
 						vector<int> possibleValues;
+						
+						// forbidden for this time
+						vector<int> thisForbidden;
 						
 						for (size_t i = 0; i < supportingPredicateTuples[predicate].size(); i++){
 							vector<int> tuple = supportingPredicateTuples[predicate][i].first;
@@ -2109,11 +2114,29 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 							int constantVar = thisSlotParameterVars[myParam][myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]]];
 							
 							possibleValues.push_back(constantVar);
-							//cout << "QQ " << constantVar << " " << myParam << " " << myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]] << " " << myObjIndex << " " << typeOfPredicateArgument[myParam]  << " " << lowerTindex[typeOfPredicateArgument[myParam]] << endl;
+							
+							int forbiddenVar = capsule.new_variable();
+							DEBUG(capsule.registerVariable(forbiddenVar,"0 @ init slot " + to_string(slot) + " predicate " + task.predicates[predicate].getName() + " forbidden tuple " + to_string(i)));
+
+							// if my value is forbidden, I may not select it.
+							andImpliesNot(solver, forbiddenVar, predicateVar, constantVar);
+
+							if (i) 
+								implies(solver,thisForbidden[thisForbidden.size()-1], forbiddenVar); // if previous tuple was forbidden, I am also forbidden
+
+							// selecting this value forbids this and later values earlier on
+							if (prevSlotAllowedFactsPerPredicate[predicate].size()){
+								andImplies(solver,predicateVar,constantVar, prevSlotAllowedFactsPerPredicate[predicate][i]);
+								implies(solver, forbiddenVar, prevSlotAllowedFactsPerPredicate[predicate][i]); // if I am already forbidden, I am also forbidden before
+							}
+							thisForbidden.push_back(forbiddenVar);
 						}
-						//cout << "A " << predicateVar << endl;
+						prevSlotAllowedFactsPerPredicate[predicate] = thisForbidden;
 						impliesOr(solver,predicateVar,possibleValues);
 					} else {
+						// forbidden for this time
+						vector<int> thisForbidden;
+						
 						//cout << "Predicate supporting tuples " << supportingPredicateTuples[predicate].size() << endl;
 						for (size_t lastPos = 0; lastPos < size_t(task.predicates[predicate].getArity() - 1) ; lastPos++){
 							map<vector<int>,set<int>> possibleUpto;
@@ -2133,13 +2156,36 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 									subTuple.push_back(constantVar);
 								}
 								
+
 								int myObjIndex = objToIndex[tuple[lastPos + 1]];
 								int myParam = predicateArgumentPositions[predicate][lastPos+1];
 								int localObjectNumber = myObjIndex - lowerTindex[typeOfPredicateArgument[myParam]];
 								//if (localObjectNumber >= parameterVars[time][myParam].size()) cout << "F " << localObjectNumber << " " << parameterVars[time][myParam].size() << endl;
 								int constantVar = thisSlotParameterVars[myParam][localObjectNumber];
-					
 								possibleUpto[subTuple].insert(constantVar);
+					
+
+								if (lastPos + 1 == size_t(task.predicates[predicate].getArity() - 1)){
+									int forbiddenVar = capsule.new_variable();
+									DEBUG(capsule.registerVariable(forbiddenVar,"0 @ init slot " + to_string(slot) + " predicate " + task.predicates[predicate].getName() + " forbidden tuple " + to_string(i)));
+
+									// for this purpose, I need the full tuple
+									subTuple.push_back(constantVar);
+								
+									if (i) 
+										implies(solver,thisForbidden[thisForbidden.size()-1], forbiddenVar); // if previous tuple was forbidden, I am also forbidden
+
+									// selecting this value forbids this and later values earlier on
+									if (prevSlotAllowedFactsPerPredicate[predicate].size()){
+										implies(solver, forbiddenVar, prevSlotAllowedFactsPerPredicate[predicate][i]); // if I am already forbidden, I am also forbidden before
+										andImplies(solver,subTuple, prevSlotAllowedFactsPerPredicate[predicate][i]);
+									}
+
+									subTuple.push_back(forbiddenVar);
+									notAll(solver,subTuple); // forbidden is also enforced
+									thisForbidden.push_back(forbiddenVar);
+								}
+
 							}
 					
 							//cout << "B" << endl;
@@ -2169,6 +2215,7 @@ void LiftedLinearSAT::generate_predicate_slot_layer(const Task &task, void* solv
 							
 							//cout << "D " << task.predicates[predicate].getArity() << endl;
 						}
+						prevSlotAllowedFactsPerPredicate[predicate] = thisForbidden;
 					}
 				}
 			}
@@ -3540,8 +3587,13 @@ utils::ExitCode LiftedLinearSAT::solve(const Task &task, int limit, bool optimal
 		bool widthMaximal = true;
 		int fromInitWidthNeeded = (i+1) * maximumTimeNeededPre;
 		if (fromInitWidthNeeded > int(initList.size())) fromInitWidthNeeded = int(initList.size());
+		if (initList.size() <= 200 && task.objects.size() <= 200) fromInitWidthNeeded = int(initList.size());
 
-		int widthNeeded = fromInitWidthNeeded + i * maximumTimeStepNetChange + goalNeededWidth;
+
+		int widthNeeded = fromInitWidthNeeded + i * maximumTimeStepNetChange;
+		if (goalNeededWidth < maximumTimeStepNetChange) widthNeeded += goalNeededWidth;
+		else widthNeeded += maximumTimeStepNetChange;
+
 		if (!foundOrdinaryPredicate) widthNeeded = 0;
 		
 		// if someone forced us to use lower width ...
