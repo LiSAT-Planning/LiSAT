@@ -2014,6 +2014,7 @@ utils::ExitCode LiftedSAT::solve(const Task &task, int limit, bool optimal, bool
 					
 					if (goalAtom.negated) {
 						goalSupporterVars.push_back(goalSupporter);
+						cout << "NEGATIVE GOAL" << endl;
 						continue; // TODO don't know what to do ...
 					}
 					gc++;
@@ -2036,7 +2037,9 @@ utils::ExitCode LiftedSAT::solve(const Task &task, int limit, bool optimal, bool
 				clausesBefore = get_number_of_clauses();
 
 				// we only test executable plans and if the goal is a dead end ...
-				if (!gc) return utils::ExitCode::SEARCH_UNSOLVABLE;
+				if (!gc && task.goal.goal.size()) {
+					return utils::ExitCode::SEARCH_UNSOLVABLE;
+				}
 
 			
 				for (int n : task.nullary_predicates){
