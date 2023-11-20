@@ -1803,9 +1803,10 @@ utils::ExitCode LiftedSAT::solve(const Task &task, int limit, bool optimal, bool
 	if (satisficing){
 		DEBUG(cout << "Parameter arity " << maxArity << " Objects " << task.objects.size() << endl);
 	
-	
 		vector<int> planLenghtsToTry;
 		if (limit == -1){
+			planLenghtsToTry.push_back(3);
+			planLenghtsToTry.push_back(5);
 			planLenghtsToTry.push_back(10);
 			planLenghtsToTry.push_back(25);
 			planLenghtsToTry.push_back(50);
