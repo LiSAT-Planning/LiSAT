@@ -24,7 +24,7 @@ def parse_options():
     parser.add_argument('--debug', dest='debug', action='store_true',
                         help='Run planner in debug mode.')
     parser.add_argument('-s', '--search', dest='search', action='store',
-                        default=None, help='Search algorithm', choices=("naive", "bfs", "gbfs", "lazy", "lazy-po", "lazy-prune", "sat", "linear"),
+                        default=None, help='Search algorithm', choices=("naive", "bfs", "gbfs", "lazy", "lazy-po", "lazy-prune", "sat", "linear", "pgsat"),
                         required=True)
     parser.add_argument('-e', '--heuristic', dest='heuristic', action='store',
                         default=None, choices=("blind", "goalcount", "add", "hmax"),
@@ -151,7 +151,7 @@ def main():
                     PYTHON_EXTRA_OPTIONS)
 
 
-    if options.search != 'sat' and options.search != 'linear':
+    if options.search != 'sat' and options.search != 'linear' and options.search != "pgsat":
         # Invoke the C++ search component
         cmd = [os.path.join(build_dir, 'search', 'search'),
                '-f', options.translator_file,

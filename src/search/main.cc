@@ -5,6 +5,7 @@
 #ifndef CMAKE_NO_SAT
 #include "sat/lifted_sat.h"
 #include "sat/lifted_linear_sat.h"
+#include "sat/partially_grounded_sat.h"
 #endif
 
 
@@ -71,6 +72,21 @@ int main(int argc, char *argv[]) {
         std::unique_ptr<LiftedLinearSAT> liftedSAT(new LiftedLinearSAT(task,opt.get_structure()));
     	try {
     	    auto exitcode = liftedSAT->solve(task,opt.get_planLength(), opt.get_optimal(), opt.get_incremental(), opt.get_width(), opt.get_timelimit());
+    	    utils::report_exit_code_reentrant(exitcode);
+    	    return static_cast<int>(exitcode);
+    	}
+    	catch (const bad_alloc& ex) {
+    	    //search->print_statistics();
+    	    exit_with(utils::ExitCode::SEARCH_OUT_OF_MEMORY);
+    	}
+#else
+		cout << "Planner was compiled without SAT solver support. Exiting." << endl;
+#endif
+	} else if (opt.get_search_engine() == "pgsat"){
+#ifndef CMAKE_NO_SAT
+        std::unique_ptr<PartiallyGroundedSAT> liftedSAT(new PartiallyGroundedSAT(task));
+    	try {
+    	    auto exitcode = liftedSAT->solve(task,opt.get_planLength(), opt.get_optimal(), opt.get_incremental());
     	    utils::report_exit_code_reentrant(exitcode);
     	    return static_cast<int>(exitcode);
     	}
