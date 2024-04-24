@@ -18,6 +18,7 @@ def parse_arguments():
     parser.add_argument('-d', '--debug',
                         action="store_true", help="Build in debug mode.")
     parser.add_argument('-s', '--sat', action="store", help="Build with SAT support. Provide the path to the directory of the SAT solver library.", default="none")
+    parser.add_argument('-c', '--cpddl', action="store", help="Build with CPDDL support. Provide the path to the directory of the CPDDL library.", default="none")
     parser.add_argument('-i', '--ipasir', action="store_true", help="Use IPASIR SAT Solver. By default we link against kissat")
     return parser.parse_args()
 
@@ -32,7 +33,7 @@ def create_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
-def build(debug_flag, sat, ipasir):
+def build(debug_flag, sat, cpddl, ipasir):
     BUILD_DIR = get_build_dir(debug_flag)
     BUILD_SEARCH_DIR = os.path.join(BUILD_DIR, 'search')
     if debug_flag:
@@ -50,6 +51,12 @@ def build(debug_flag, sat, ipasir):
         else:
             cmakeArguments.append('-DKISSAT=ON')
         cmakeArguments.append('-DSAT_DIR=' + sat)
+
+    if cpddl != 'none':
+        cmakeArguments.append('-DCPDDL=ON')
+        cmakeArguments.append('-DCPDDL_DIR=' + cpddl)
+
+    print(cmakeArguments)
     subprocess.check_call(cmakeArguments,
                           cwd=BUILD_SEARCH_DIR)
     subprocess.check_call(['make', '-j5'], cwd=BUILD_SEARCH_DIR)
@@ -57,4 +64,4 @@ def build(debug_flag, sat, ipasir):
 
 if __name__ == '__main__':
     args = parse_arguments()
-    build(args.debug, args.sat, args.ipasir)
+    build(args.debug, args.sat, args.cpddl, args.ipasir)

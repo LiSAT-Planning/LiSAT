@@ -6,7 +6,7 @@ cmake_policy(SET CMP0115 OLD)
 
 option(SAT "Compile with the SAT planner" OFF)
 option(KISSAT "Compile with the kissat SAT solver" ON)
-
+option(CPDDL "Compile with CPDDL support" OFF)
 
 list(APPEND linker_flags "$<$<CONFIG:DEBUG>:-lpthread;-g>" "$<$<CONFIG:RELEASE>:-flto;-lpthread>")
 
@@ -46,6 +46,17 @@ else (SAT)
 	set(CMAKE_CXX_FLAGS "-Wall -Wnon-virtual-dtor -DCMAKE_NO_SAT")
 endif(SAT)
 
+
+
+if (CPDDL)
+	message("Compiling with cpddl support. Adding link directory: "${CPDDL_DIR})
+	link_directories(${CPDDL_DIR})
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I${CPDDL_DIR}")
+	message(${CMAKE_CXX_FLAGS})
+else (CPDDL)
+	message("Compiling without cpddl support.")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DCMAKE_NO_CPDDL")
+endif (CPDDL)
 
 set(GENERAL_SOURCE_FILES
         main.cc
@@ -139,6 +150,10 @@ else (SAT)
 	add_executable(search ${GENERAL_SOURCE_FILES})
 endif()
 		
+if (CPDDL)
+	target_link_libraries(search PRIVATE pddl)
+	#add_executable(search ${GENERAL_SOURCE_FILES} ${SAT_SOURCE_FILES} sat/kissat.h sat/kissat.cpp)
+endif (CPDDL)
 
 target_link_options(search PUBLIC ${linker_flags})
 
